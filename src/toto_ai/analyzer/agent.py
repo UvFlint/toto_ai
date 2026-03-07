@@ -135,6 +135,8 @@ def _prepare_match_data(matches: list[Match], stats: list[MatchStats]) -> list[d
                 entry["home_xg"] = s.home_xg.model_dump()
             if s.away_xg:
                 entry["away_xg"] = s.away_xg.model_dump()
+            if s.poisson_probs:
+                entry["poisson_probs"] = s.poisson_probs.model_dump()
         data.append(entry)
     return data
 
@@ -259,6 +261,13 @@ async def analyze_matches(
     tasks = [_run_single_model(model_id, model_name, prompt) for model_id, model_name in models]
     columns = await asyncio.gather(*tasks)
     columns = [c for c in columns if c.predictions]  # Filter out failed models
+
+    # Add Poisson/Dixon-Coles statistical model as a voting column
+    from toto_ai.stats.poisson import build_poisson_column
+
+    poisson_col = build_poisson_column(matches, stats)
+    if poisson_col.predictions:
+        columns.append(poisson_col)
 
     if not columns:
         console.print("[red]All models failed. Cannot produce report.[/red]")

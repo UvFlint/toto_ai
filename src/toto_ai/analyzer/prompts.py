@@ -25,6 +25,10 @@ For each match, consider these factors in order of importance:
 9. **Expected Goals (xG)** (when available): xG vs actual goals reveals over/underperformance. \
 Teams scoring well above xG are due for regression. xPTS vs actual points shows "lucky" teams. \
 PPDA indicates pressing intensity (lower = more aggressive pressing)
+10. **Statistical Baseline** (when provided): Poisson model probabilities give a data-driven \
+starting point based on team strength and historical goal rates. Use as a sanity check — if your \
+analysis strongly disagrees, explain why. The model does NOT account for injuries, motivation, \
+tactical changes, or cup context.
 
 ## Important Guidelines
 - Be HONEST about uncertainty. Don't force a prediction if the match is truly unpredictable
@@ -165,6 +169,14 @@ def build_match_data_prompt(
             od = match["odds"]
             section += "\n### Betting Odds\n"
             section += f"- {od.get('bookmaker', 'N/A')}: 1={od.get('home_odds', 'N/A')} X={od.get('draw_odds', 'N/A')} 2={od.get('away_odds', 'N/A')}\n"
+
+        if match.get("poisson_probs"):
+            pp = match["poisson_probs"]
+            section += "\n### Statistical Model (Poisson/Dixon-Coles)\n"
+            section += f"- Expected goals: {pp['expected_home_goals']:.2f} - {pp['expected_away_goals']:.2f}\n"
+            section += f"- P(Home win): {pp['home_win']:.1%}\n"
+            section += f"- P(Draw): {pp['draw']:.1%}\n"
+            section += f"- P(Away win): {pp['away_win']:.1%}\n"
 
         if match.get("home_xg") or match.get("away_xg"):
             section += "\n### Expected Goals (xG) - Season Stats\n"

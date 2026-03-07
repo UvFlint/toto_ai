@@ -109,6 +109,16 @@ class TeamXG(BaseModel):
     recent_match_xga: list[float] = []
 
 
+class PoissonProbabilities(BaseModel):
+    """Poisson/Dixon-Coles model output for a single match."""
+
+    home_win: float = 0.0  # P(1)
+    draw: float = 0.0  # P(X)
+    away_win: float = 0.0  # P(2)
+    expected_home_goals: float = 0.0
+    expected_away_goals: float = 0.0
+
+
 class MatchStats(BaseModel):
     """All gathered statistics for a single match."""
 
@@ -137,3 +147,5 @@ class MatchStats(BaseModel):
     away_rest_days: int | None = None
     home_avg_days_between: float | None = None
     away_avg_days_between: float | None = None
+    # Poisson/Dixon-Coles model probabilities
+    poisson_probs: PoissonProbabilities | None = None

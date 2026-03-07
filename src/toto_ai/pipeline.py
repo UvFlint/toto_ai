@@ -497,6 +497,21 @@ async def run_pipeline(
         await _enrich_xg(form.matches, stats, no_research)
         console.print()
 
+        # ── Step 2c: Statistical Model (Poisson/Dixon-Coles) ─────────
+        console.rule("[bold]Step 2c: Statistical Model (Poisson/Dixon-Coles)[/bold]")
+        from toto_ai.stats.poisson import compute_all_probabilities
+
+        poisson_probs = compute_all_probabilities(form.matches, stats)
+        computed = 0
+        for i, p in enumerate(poisson_probs):
+            if p and i < len(stats):
+                stats[i].poisson_probs = p
+                computed += 1
+        console.print(
+            f"[green]Poisson probabilities computed for {computed}/{len(form.matches)} matches[/green]"
+        )
+        console.print()
+
         # ── Step 3: News Gathering ────────────────────────────────────
         console.rule("[bold]Step 3: Gathering News[/bold]")
         await _gather_news(form.matches, stats, no_research)
@@ -646,6 +661,21 @@ async def run_test_pipeline(
     # Step 2b: xG Enrichment
     console.rule("[bold]Step 2b: xG Enrichment (Understat)[/bold]")
     await _enrich_xg(form.matches, stats, no_research)
+    console.print()
+
+    # Step 2c: Statistical Model (Poisson/Dixon-Coles)
+    console.rule("[bold]Step 2c: Statistical Model (Poisson/Dixon-Coles)[/bold]")
+    from toto_ai.stats.poisson import compute_all_probabilities
+
+    poisson_probs = compute_all_probabilities(form.matches, stats)
+    computed = 0
+    for i, p in enumerate(poisson_probs):
+        if p and i < len(stats):
+            stats[i].poisson_probs = p
+            computed += 1
+    console.print(
+        f"[green]Poisson probabilities computed for {computed}/{len(form.matches)} matches[/green]"
+    )
     console.print()
 
     # Step 3: News gathering
