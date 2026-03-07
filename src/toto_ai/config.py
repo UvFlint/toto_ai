@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # Submission tracker
     TRACKER_FILE: str = "data/submissions.json"
 
+    # Calibration (post-odds multiplier + review history)
+    CALIBRATION_FILE: str = "data/calibration.json"
+
     # Historical data collection
     FOOTBALL_DATA_DIR: str = "data/football_data"
 

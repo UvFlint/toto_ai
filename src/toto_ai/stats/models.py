@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from toto_ai.news.models import MatchNewsAnalysis
+
 
 class FixtureResult(BaseModel):
     home_team: str
@@ -153,3 +155,5 @@ class MatchStats(BaseModel):
     catboost_probs: dict[str, float] | None = None
     # XGBoost ML model probabilities
     xgboost_probs: dict[str, float] | None = None
+    # Structured news categorization
+    news_analysis: MatchNewsAnalysis | None = None

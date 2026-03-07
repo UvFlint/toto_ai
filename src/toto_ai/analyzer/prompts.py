@@ -18,7 +18,11 @@ For each match, consider these factors in order of importance:
 2. **Home/Away Advantage**: Home teams statistically win ~45% of matches
 3. **Head-to-Head Record**: Historical matchups between these teams
 4. **League Position Gap**: Larger gaps suggest clearer favorites
-5. **News & Context**: Injuries, suspensions, transfers, managerial changes
+5. **News & Context**: When a structured News Impact Analysis is provided, pay special \
+attention to items marked [POST-ODDS] — these represent information the bookmaker could not \
+have priced in. X-FACTOR ALERTs are particularly important for matches where odds suggest an \
+even contest. Categorized news with impact scores quantifies the effect of injuries, \
+suspensions, transfers, and managerial changes.
 6. **Motivation**: Title race, relegation battle, nothing to play for
 7. **Fixture Congestion**: Midweek games, rotation risk
 8. **Injuries/Suspensions**: Missing key players significantly affect match outcomes
@@ -231,6 +235,25 @@ def build_match_data_prompt(
             != f"News unavailable for {match['home_team']} vs {match['away_team']}"
         ):
             section += f"\n### Recent News\n{match['news']}\n"
+
+        na = match.get("news_analysis")
+        if na and na.get("items"):
+            section += "\n### News Impact Analysis\n"
+            section += f"- **Home team impact**: {na['home_impact_score']:+.2f}\n"
+            section += f"- **Away team impact**: {na['away_impact_score']:+.2f}\n"
+            net = na["net_impact"]
+            direction = "favors home" if net > 0 else "favors away" if net < 0 else "neutral"
+            section += f"- **Net impact**: {net:+.2f} ({direction})\n"
+            if na.get("has_x_factor"):
+                section += "- **X-FACTOR ALERT**: High-impact news emerged after odds were set!\n"
+            section += "\nCategorized news items:\n"
+            for item in na["items"]:
+                post_tag = " [POST-ODDS]" if item.get("is_post_odds") else ""
+                section += (
+                    f"- [{item['category'].upper()}] {item['headline']} "
+                    f"({item['affected_team']}, {item['direction']}, "
+                    f"conf={item['confidence']:.0%}){post_tag}\n"
+                )
 
         sections.append(section)
 

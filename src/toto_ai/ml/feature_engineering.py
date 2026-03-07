@@ -80,6 +80,14 @@ INFERENCE_ONLY_FEATURES = [
     "home_position",
     "away_position",
     "position_diff",
+    # News-derived features
+    "news_home_impact",
+    "news_away_impact",
+    "news_net_impact",
+    "news_max_weight",
+    "news_has_x_factor",
+    "news_home_absence_count",
+    "news_away_absence_count",
 ]
 
 # Target encoding: FTR/Res values → numeric classes
@@ -501,6 +509,14 @@ def build_inference_features(
     home_position: float | None = None,
     away_position: float | None = None,
     position_diff: float | None = None,
+    # News-derived features
+    news_home_impact: float | None = None,
+    news_away_impact: float | None = None,
+    news_net_impact: float | None = None,
+    news_max_weight: float | None = None,
+    news_has_x_factor: float | None = None,
+    news_home_absence_count: float | None = None,
+    news_away_absence_count: float | None = None,
 ) -> dict:
     """Build a feature dict for a single match at inference time.
 
@@ -601,4 +617,12 @@ def build_inference_features(
         "home_position": home_position,
         "away_position": away_position,
         "position_diff": position_diff,
+        # News-derived
+        "news_home_impact": news_home_impact,
+        "news_away_impact": news_away_impact,
+        "news_net_impact": news_net_impact,
+        "news_max_weight": news_max_weight,
+        "news_has_x_factor": news_has_x_factor,
+        "news_home_absence_count": news_home_absence_count,
+        "news_away_absence_count": news_away_absence_count,
     }

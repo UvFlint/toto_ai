@@ -167,6 +167,32 @@ async def _gather_news(
     await gather_news(stats, matches)
 
 
+def _attach_news_snapshots(
+    report: FullReport, matches: list[Match], stats: list[MatchStats]
+) -> None:
+    """Populate report.news_snapshots from stats for later review."""
+    from toto_ai.analyzer.models import MatchNewsSnapshot
+    from toto_ai.calibration import CalibrationManager
+    from toto_ai.config import settings
+
+    try:
+        multiplier = CalibrationManager(settings.CALIBRATION_FILE).post_odds_multiplier
+    except Exception:
+        multiplier = 1.5
+
+    for i, s in enumerate(stats):
+        if s.news_analysis and s.news_analysis.items:
+            report.news_snapshots.append(
+                MatchNewsSnapshot(
+                    match_number=matches[i].match_number,
+                    has_x_factor=s.news_analysis.has_x_factor,
+                    net_impact=s.news_analysis.net_impact,
+                    post_odds_item_count=sum(1 for it in s.news_analysis.items if it.is_post_odds),
+                    multiplier_used=multiplier,
+                )
+            )
+
+
 def _verify_enrichment(matches: list[Match], stats: list[MatchStats]) -> tuple[bool, bool]:
     """Log a summary table of data coverage per match and warn about gaps.
 
@@ -539,6 +565,14 @@ async def run_pipeline(
         await _gather_news(form.matches, stats, no_research)
         console.print()
 
+        # ── Step 3b: News Categorization ──────────────────────────────
+        if not no_research:
+            console.rule("[bold]Step 3b: Categorizing News[/bold]")
+            from toto_ai.news.categorizer import categorize_all_news
+
+            await categorize_all_news(stats, form.matches)
+            console.print()
+
         console.rule("[bold]Data Verification[/bold]")
         critical_gaps, _warnings = _verify_enrichment(form.matches, stats)
         console.print()
@@ -578,6 +612,7 @@ async def run_pipeline(
         console.rule(f"[bold]Step 4: AI Analysis ({len(models)} Models — {tier})[/bold]")
         report = await analyze_matches(form.matches, stats, premium=premium)
         report.form_number = form.form_number
+        _attach_news_snapshots(report, form.matches, stats)
         console.print()
 
         console.rule("[bold]Step 5: Results[/bold]")
@@ -727,6 +762,14 @@ async def run_test_pipeline(
     await _gather_news(form.matches, stats, no_research)
     console.print()
 
+    # Step 3b: News Categorization
+    if not no_research:
+        console.rule("[bold]Step 3b: Categorizing News[/bold]")
+        from toto_ai.news.categorizer import categorize_all_news
+
+        await categorize_all_news(stats, form.matches)
+        console.print()
+
     # Data verification
     console.rule("[bold]Data Verification[/bold]")
     critical_gaps, _warnings = _verify_enrichment(form.matches, stats)
@@ -748,6 +791,7 @@ async def run_test_pipeline(
         form.matches, stats, premium=premium, reference_date=reference_date
     )
     report.form_number = form.form_number
+    _attach_news_snapshots(report, form.matches, stats)
     console.print()
 
     # Step 5: Display predictions

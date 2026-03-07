@@ -345,6 +345,22 @@ def _extract_xg_features(stats: MatchStats | None) -> dict:
     return result
 
 
+def _extract_news_features(stats: MatchStats | None) -> dict:
+    """Extract news-derived features from MatchNewsAnalysis."""
+    if not stats or not stats.news_analysis:
+        return {}
+    na = stats.news_analysis
+    return {
+        "news_home_impact": na.home_impact_score,
+        "news_away_impact": na.away_impact_score,
+        "news_net_impact": na.net_impact,
+        "news_max_weight": na.max_item_weight,
+        "news_has_x_factor": 1.0 if na.has_x_factor else 0.0,
+        "news_home_absence_count": float(na.team_absence_count("home")),
+        "news_away_absence_count": float(na.team_absence_count("away")),
+    }
+
+
 def _extract_standing_features(stats: MatchStats | None) -> dict:
     """Extract league standing position features."""
     if not stats:
@@ -437,6 +453,7 @@ def predict_match(
     h2h_feats = _extract_h2h_features(stats)
     xg_feats = _extract_xg_features(stats)
     standing_feats = _extract_standing_features(stats)
+    news_feats = _extract_news_features(stats)
 
     features = build_inference_features(
         match_league=league_code,
@@ -470,6 +487,7 @@ def predict_match(
         **h2h_feats,
         **xg_feats,
         **standing_feats,
+        **news_feats,
     )
 
     # Choose model: rich if the league is in main divisions and rich model exists

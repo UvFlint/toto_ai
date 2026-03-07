@@ -35,6 +35,16 @@ class FullColumn(BaseModel):
     column_type: Literal["ai", "statistical", "ml"] = "ai"
 
 
+class MatchNewsSnapshot(BaseModel):
+    """News analysis snapshot saved with report for later review."""
+
+    match_number: int
+    has_x_factor: bool = False
+    net_impact: float = 0.0
+    post_odds_item_count: int = 0
+    multiplier_used: float = 1.5
+
+
 class ConsensusMatch(BaseModel):
     match_number: int
     home_team: str
@@ -66,6 +76,7 @@ class FullReport(BaseModel):
         default_factory=list,
         description="Match numbers with high disagreement between models",
     )
+    news_snapshots: list[MatchNewsSnapshot] = Field(default_factory=list)
 
     @property
     def total_cost_usd(self) -> float:

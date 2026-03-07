@@ -39,9 +39,19 @@ from toto_ai.console import console
     help="Mark a form number as already submitted and exit",
 )
 @click.option("--test", is_flag=True, help="Backtest against a past results form (prompts for URL)")
-@click.option("--download-data", is_flag=True, help="Download historical match CSVs from football-data.co.uk")
+@click.option(
+    "--download-data", is_flag=True, help="Download historical match CSVs from football-data.co.uk"
+)
 @click.option("--force-download", is_flag=True, help="Re-download existing CSV files")
 @click.option("--train-model", is_flag=True, help="Train CatBoost models from historical data")
+@click.option(
+    "--review",
+    type=str,
+    default=None,
+    is_flag=False,
+    flag_value="latest",
+    help="Review predictions vs actual results. Pass form number or omit for latest.",
+)
 def main(
     dry_run: bool,
     no_research: bool,
@@ -53,8 +63,18 @@ def main(
     download_data: bool,
     force_download: bool,
     train_model: bool,
+    review: str | None,
 ) -> None:
     """Analyze the current Winner 16 form and predict outcomes using AI models."""
+    if review:
+        from toto_ai.review import run_review
+
+        console.print("[bold blue]Toto AI - Weekly Review[/bold blue]")
+        console.print()
+        form_num = None if review == "latest" else review
+        asyncio.run(run_review(form_number=form_num))
+        return
+
     if test:
         if dry_run or send_auto or schedule:
             console.print(

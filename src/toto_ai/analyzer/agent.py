@@ -141,6 +141,14 @@ def _prepare_match_data(matches: list[Match], stats: list[MatchStats]) -> list[d
                 entry["catboost_probs"] = s.catboost_probs
             if s.xgboost_probs:
                 entry["xgboost_probs"] = s.xgboost_probs
+            if s.news_analysis and s.news_analysis.items:
+                entry["news_analysis"] = {
+                    "items": [item.model_dump() for item in s.news_analysis.items],
+                    "home_impact_score": s.news_analysis.home_impact_score,
+                    "away_impact_score": s.news_analysis.away_impact_score,
+                    "net_impact": s.news_analysis.net_impact,
+                    "has_x_factor": s.news_analysis.has_x_factor,
+                }
         data.append(entry)
     return data
 

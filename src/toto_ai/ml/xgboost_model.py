@@ -22,6 +22,7 @@ from toto_ai.ml.catboost_model import (
     _extract_form_match_stats,
     _extract_form_stats,
     _extract_h2h_features,
+    _extract_news_features,
     _extract_standing_features,
     _extract_standing_stats,
     _extract_xg_features,
@@ -393,6 +394,7 @@ def predict_match(
     h2h_feats = _extract_h2h_features(stats)
     xg_feats = _extract_xg_features(stats)
     standing_feats = _extract_standing_features(stats)
+    news_feats = _extract_news_features(stats)
 
     features = build_inference_features(
         match_league=league_code,
@@ -426,6 +428,7 @@ def predict_match(
         **h2h_feats,
         **xg_feats,
         **standing_feats,
+        **news_feats,
     )
 
     # Choose model
