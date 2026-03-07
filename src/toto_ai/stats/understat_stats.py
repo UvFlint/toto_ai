@@ -27,7 +27,6 @@ HEBREW_LEAGUE_MAP: dict[str, str] = {
     "איטלקית ראשונה": "Serie_A",
     "גרמנית ראשונה": "Bundesliga",
     "צרפתית ראשונה": "Ligue_1",
-    
 }
 
 _UNDERSTAT_BASE = "https://understat.com/getLeagueData"
@@ -67,6 +66,13 @@ def _aggregate_team(title: str, history: list[dict]) -> TeamXG:
     n = len(history)
     if n == 0:
         return TeamXG(team_name=title)
+
+    # Sort by date descending to get most recent matches first
+    sorted_hist = sorted(history, key=lambda m: m.get("date", ""), reverse=True)
+
+    # Extract last 5 match-level xG/xGA
+    recent_xg = [round(m["xG"], 2) for m in sorted_hist[:5]]
+    recent_xga = [round(m["xGA"], 2) for m in sorted_hist[:5]]
 
     xg = sum(m["xG"] for m in history)
     xga = sum(m["xGA"] for m in history)
@@ -109,6 +115,8 @@ def _aggregate_team(title: str, history: list[dict]) -> TeamXG:
         odc=deep_allowed,
         xg_per_game=round(xg / n, 2),
         xga_per_game=round(xga / n, 2),
+        recent_match_xg=recent_xg,
+        recent_match_xga=recent_xga,
     )
 
 

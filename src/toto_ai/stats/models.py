@@ -12,6 +12,8 @@ class FixtureResult(BaseModel):
     away_goals: int
     date: datetime | None = None
     league: str = ""
+    fixture_id: int | None = None
+    referee: str = ""
 
 
 class H2HData(BaseModel):
@@ -23,6 +25,17 @@ class H2HData(BaseModel):
     away_wins: int = 0
 
 
+class TeamFormStats(BaseModel):
+    """Aggregated match statistics from a team's recent matches."""
+
+    avg_possession: float = 0.0
+    avg_shots_total: float = 0.0
+    avg_shots_on_target: float = 0.0
+    avg_corners: float = 0.0
+    avg_fouls: float = 0.0
+    matches_with_stats: int = 0
+
+
 class TeamForm(BaseModel):
     team_name: str
     recent_matches: list[FixtureResult] = []
@@ -32,6 +45,7 @@ class TeamForm(BaseModel):
     goals_for: int = 0
     goals_against: int = 0
     form_string: str = ""  # e.g. "WWDLW"
+    form_stats: TeamFormStats | None = None
 
 
 class Standing(BaseModel):
@@ -90,6 +104,9 @@ class TeamXG(BaseModel):
     # Per-game averages
     xg_per_game: float = 0.0
     xga_per_game: float = 0.0
+    # Match-level xG trends (last 5 matches, most recent first)
+    recent_match_xg: list[float] = []
+    recent_match_xga: list[float] = []
 
 
 class MatchStats(BaseModel):
@@ -113,3 +130,10 @@ class MatchStats(BaseModel):
     odds: OddsData | None = None
     home_xg: TeamXG | None = None
     away_xg: TeamXG | None = None
+    # Referee for the upcoming match
+    referee: str = ""
+    # Fixture congestion
+    home_rest_days: int | None = None
+    away_rest_days: int | None = None
+    home_avg_days_between: float | None = None
+    away_avg_days_between: float | None = None

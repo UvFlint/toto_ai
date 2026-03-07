@@ -90,6 +90,15 @@ def build_match_data_prompt(
             section += (
                 f"- Goals: {hf.get('goals_for', 0)} scored, {hf.get('goals_against', 0)} conceded\n"
             )
+            fs = hf.get("form_stats")
+            if fs and fs.get("matches_with_stats", 0) > 0:
+                section += (
+                    f"- Possession: {fs['avg_possession']:.1f}%"
+                    f" | Shots: {fs['avg_shots_total']:.1f}"
+                    f" ({fs['avg_shots_on_target']:.1f} on target)\n"
+                    f"- Corners: {fs['avg_corners']:.1f}"
+                    f" | Fouls: {fs['avg_fouls']:.1f}\n"
+                )
         elif flag_gaps:
             section += f"\n### {match['home_team']} Recent Form\n"
             section += "[Data not available]\n"
@@ -104,6 +113,15 @@ def build_match_data_prompt(
             section += (
                 f"- Goals: {af.get('goals_for', 0)} scored, {af.get('goals_against', 0)} conceded\n"
             )
+            fs = af.get("form_stats")
+            if fs and fs.get("matches_with_stats", 0) > 0:
+                section += (
+                    f"- Possession: {fs['avg_possession']:.1f}%"
+                    f" | Shots: {fs['avg_shots_total']:.1f}"
+                    f" ({fs['avg_shots_on_target']:.1f} on target)\n"
+                    f"- Corners: {fs['avg_corners']:.1f}"
+                    f" | Fouls: {fs['avg_fouls']:.1f}\n"
+                )
         elif flag_gaps:
             section += f"\n### {match['away_team']} Recent Form\n"
             section += "[Data not available]\n"
@@ -120,12 +138,28 @@ def build_match_data_prompt(
         if match.get("match_date"):
             section += f"\n**Match Date:** {match['match_date']}\n"
 
+        if match.get("home_rest_days") is not None or match.get("away_rest_days") is not None:
+            section += "\n### Fixture Congestion\n"
+            if match.get("home_rest_days") is not None:
+                line = f"- {match['home_team']}: {match['home_rest_days']} days rest"
+                if match.get("home_avg_days_between") is not None:
+                    line += f" (avg gap: {match['home_avg_days_between']:.1f} days)"
+                section += line + "\n"
+            if match.get("away_rest_days") is not None:
+                line = f"- {match['away_team']}: {match['away_rest_days']} days rest"
+                if match.get("away_avg_days_between") is not None:
+                    line += f" (avg gap: {match['away_avg_days_between']:.1f} days)"
+                section += line + "\n"
+
         if match.get("home_injuries") or match.get("away_injuries"):
             section += "\n### Injuries & Suspensions\n"
             for inj in match.get("home_injuries", []):
                 section += f"- [{match['home_team']}] {inj.get('player_name', '?')} — {inj.get('type', '?')}: {inj.get('reason', 'N/A')}\n"
             for inj in match.get("away_injuries", []):
                 section += f"- [{match['away_team']}] {inj.get('player_name', '?')} — {inj.get('type', '?')}: {inj.get('reason', 'N/A')}\n"
+
+        if match.get("referee"):
+            section += f"\n### Referee: {match['referee']}\n"
 
         if match.get("odds"):
             od = match["odds"]
@@ -150,6 +184,16 @@ def build_match_data_prompt(
                         f" (diff: {xg['xpts_diff']:+.1f})\n"
                         f"- PPDA: {xg['ppda']:.1f} (pressing intensity)\n"
                     )
+                    if xg.get("recent_match_xg"):
+                        vals = ", ".join(f"{v:.2f}" for v in xg["recent_match_xg"])
+                        section += (
+                            f"- Recent xG trend (last {len(xg['recent_match_xg'])}): {vals}\n"
+                        )
+                    if xg.get("recent_match_xga"):
+                        vals = ", ".join(f"{v:.2f}" for v in xg["recent_match_xga"])
+                        section += (
+                            f"- Recent xGA trend (last {len(xg['recent_match_xga'])}): {vals}\n"
+                        )
 
         if (
             match.get("news")

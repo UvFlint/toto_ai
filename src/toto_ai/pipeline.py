@@ -184,6 +184,8 @@ def _verify_enrichment(matches: list[Match], stats: list[MatchStats]) -> tuple[b
     table.add_column("Standings", justify="center", width=10)
     table.add_column("News", justify="center", width=5)
     table.add_column("xG", justify="center", width=4)
+    table.add_column("Ref", justify="center", width=4)
+    table.add_column("Rest", justify="center", width=5)
 
     ok = "[green]OK[/green]"
     gap = "[red]MISS[/red]"
@@ -268,6 +270,16 @@ def _verify_enrichment(matches: list[Match], stats: list[MatchStats]) -> tuple[b
         else:
             xg_cell = "[dim]N/A[/dim]"
 
+        # Referee (non-critical)
+        ref_cell = ok if (s and s.referee) else "[dim]N/A[/dim]"
+
+        # Rest days (non-critical)
+        rest_cell = (
+            ok
+            if (s and s.home_rest_days is not None and s.away_rest_days is not None)
+            else "[dim]N/A[/dim]"
+        )
+
         table.add_row(
             str(match.match_number),
             label,
@@ -277,6 +289,8 @@ def _verify_enrichment(matches: list[Match], stats: list[MatchStats]) -> tuple[b
             st_cell,
             nw_cell,
             xg_cell,
+            ref_cell,
+            rest_cell,
         )
 
         if critical_issues:

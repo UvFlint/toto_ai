@@ -121,6 +121,16 @@ def _prepare_match_data(matches: list[Match], stats: list[MatchStats]) -> list[d
                 entry["away_injuries"] = [inj.model_dump() for inj in s.away_injuries]
             if s.odds:
                 entry["odds"] = s.odds.model_dump()
+            if s.referee:
+                entry["referee"] = s.referee
+            if s.home_rest_days is not None:
+                entry["home_rest_days"] = s.home_rest_days
+            if s.away_rest_days is not None:
+                entry["away_rest_days"] = s.away_rest_days
+            if s.home_avg_days_between is not None:
+                entry["home_avg_days_between"] = s.home_avg_days_between
+            if s.away_avg_days_between is not None:
+                entry["away_avg_days_between"] = s.away_avg_days_between
             if s.home_xg:
                 entry["home_xg"] = s.home_xg.model_dump()
             if s.away_xg:

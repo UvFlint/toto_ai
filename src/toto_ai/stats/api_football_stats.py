@@ -15,6 +15,7 @@ from toto_ai.stats.models import (
     OddsData,
     Standing,
     TeamForm,
+    TeamFormStats,
 )
 from toto_ai.stats.team_mapper import TeamMapper
 
@@ -47,6 +48,8 @@ def _parse_fixture_result(fixture: dict) -> FixtureResult:
         away_goals=goals.get("away") or 0,
         date=date,
         league=league.get("name", ""),
+        fixture_id=info.get("id"),
+        referee=(info.get("referee") or ""),
     )
 
 
@@ -180,12 +183,86 @@ def _parse_odds(odds_data: list[dict]) -> OddsData | None:
     return None
 
 
+def _compute_rest_days(
+    form: TeamForm | None,
+    match_date: datetime | None,
+) -> tuple[int | None, float | None]:
+    """Return (rest_days_before_match, avg_days_between_recent_matches).
+
+    rest_days: days between the team's most recent match and the upcoming match.
+    avg_days_between: average gap between consecutive recent matches.
+    """
+    if not form or not form.recent_matches:
+        return None, None
+
+    dated = sorted(
+        (m for m in form.recent_matches if m.date),
+        key=lambda m: m.date,  # type: ignore[arg-type]
+        reverse=True,
+    )
+    if not dated:
+        return None, None
+
+    rest_days = None
+    if match_date:
+        most_recent = dated[0].date
+        if most_recent:
+            # Strip tzinfo for safe subtraction
+            md = match_date.replace(tzinfo=None) if match_date.tzinfo else match_date
+            mr = most_recent.replace(tzinfo=None) if most_recent.tzinfo else most_recent
+            rest_days = (md - mr).days
+
+    avg_gap = None
+    if len(dated) >= 2:
+        gaps: list[int] = []
+        for a, b in zip(dated, dated[1:]):
+            if a.date and b.date:
+                da = a.date.replace(tzinfo=None) if a.date.tzinfo else a.date
+                db = b.date.replace(tzinfo=None) if b.date.tzinfo else b.date
+                gaps.append((da - db).days)
+        if gaps:
+            avg_gap = round(sum(gaps) / len(gaps), 1)
+
+    return rest_days, avg_gap
+
+
+def _parse_fixture_statistics(stats_response: list[dict], team_id: int) -> dict[str, float] | None:
+    """Extract key statistics for a specific team from /fixtures/statistics response."""
+    for team_stats in stats_response:
+        if team_stats.get("team", {}).get("id") != team_id:
+            continue
+        result: dict[str, float] = {}
+        for stat in team_stats.get("statistics", []):
+            stat_type = stat.get("type", "")
+            value = stat.get("value")
+            if value is None:
+                continue
+            if stat_type == "Ball Possession":
+                # e.g. "55%" -> 55.0
+                try:
+                    result["possession"] = float(str(value).replace("%", ""))
+                except ValueError:
+                    pass
+            elif stat_type == "Total Shots":
+                result["shots_total"] = float(value)
+            elif stat_type == "Shots on Goal":
+                result["shots_on_target"] = float(value)
+            elif stat_type == "Corner Kicks":
+                result["corners"] = float(value)
+            elif stat_type == "Fouls":
+                result["fouls"] = float(value)
+        return result if result else None
+    return None
+
+
 class ApiFootballStatsCollector:
     """Collect match statistics from API-Football v3."""
 
     def __init__(self) -> None:
         from toto_ai.config import settings
 
+        self._fetch_match_stats = settings.API_FOOTBALL_FETCH_MATCH_STATS
+        self._fixture_stats_cache: dict[int, list[dict]] = {}
         self._client = ApiFootballClient(
             api_key=settings.API_FOOTBALL_API_KEY,
             host=settings.API_FOOTBALL_HOST,
@@ -205,8 +282,8 @@ class ApiFootballStatsCollector:
         away_id: int,
         match_date: datetime | None,
         client: httpx.AsyncClient,
-    ) -> int | None:
-        """Find the fixture ID for a specific match."""
+    ) -> tuple[int | None, str]:
+        """Find the fixture ID and referee for a specific match."""
         params: dict = {"team": home_id, "season": _current_season()}
         if match_date:
             params["date"] = match_date.strftime("%Y-%m-%d")
@@ -217,22 +294,20 @@ class ApiFootballStatsCollector:
             data = await self._client.get("fixtures", params, client=client)
             for fixture in data.get("response", []):
                 teams = fixture.get("teams", {})
-                if (
+                info = fixture.get("fixture", {})
+                matched = (
                     teams.get("home", {}).get("id") == home_id
                     and teams.get("away", {}).get("id") == away_id
-                ):
-                    return fixture.get("fixture", {}).get("id")
-
-                # Also check reverse (in case home/away got swapped in our data)
-                if (
+                ) or (
                     teams.get("home", {}).get("id") == away_id
                     and teams.get("away", {}).get("id") == home_id
-                ):
-                    return fixture.get("fixture", {}).get("id")
+                )
+                if matched:
+                    return info.get("id"), (info.get("referee") or "")
         except Exception as e:
             console.print(f"[dim]Fixture lookup failed: {e}[/dim]")
 
-        return None
+        return None, ""
 
     async def _fetch_standings(
         self, league_id: int, season: int, client: httpx.AsyncClient
@@ -257,6 +332,47 @@ class ApiFootballStatsCollector:
             console.print(f"[dim]Standings fetch failed for league {league_id}: {e}[/dim]")
 
         return []
+
+    async def _fetch_form_stats(
+        self,
+        form: TeamForm,
+        team_id: int,
+        client: httpx.AsyncClient,
+    ) -> TeamFormStats | None:
+        """Fetch and aggregate match statistics for a team's recent matches."""
+        fixture_ids = [m.fixture_id for m in form.recent_matches if m.fixture_id is not None]
+        if not fixture_ids:
+            return None
+
+        # Fetch statistics for each fixture (using cache to avoid duplicates)
+        all_stats: list[dict[str, float]] = []
+        for fid in fixture_ids:
+            if fid not in self._fixture_stats_cache:
+                try:
+                    data = await self._client.get(
+                        "fixtures/statistics", {"fixture": fid}, client=client
+                    )
+                    self._fixture_stats_cache[fid] = data.get("response", [])
+                except Exception as e:
+                    console.print(f"[dim]Stats fetch failed for fixture {fid}: {e}[/dim]")
+                    self._fixture_stats_cache[fid] = []
+
+            parsed = _parse_fixture_statistics(self._fixture_stats_cache[fid], team_id)
+            if parsed:
+                all_stats.append(parsed)
+
+        if not all_stats:
+            return None
+
+        n = len(all_stats)
+        return TeamFormStats(
+            avg_possession=round(sum(s.get("possession", 0) for s in all_stats) / n, 1),
+            avg_shots_total=round(sum(s.get("shots_total", 0) for s in all_stats) / n, 1),
+            avg_shots_on_target=round(sum(s.get("shots_on_target", 0) for s in all_stats) / n, 1),
+            avg_corners=round(sum(s.get("corners", 0) for s in all_stats) / n, 1),
+            avg_fouls=round(sum(s.get("fouls", 0) for s in all_stats) / n, 1),
+            matches_with_stats=n,
+        )
 
     async def research_match(
         self,
@@ -296,8 +412,8 @@ class ApiFootballStatsCollector:
             home_english = home_info.english_name
             away_english = away_info.english_name
 
-            # Find fixture ID (for injuries, odds, predictions)
-            fixture_id = await self._find_fixture_id(home_id, away_id, match_date, client)
+            # Find fixture ID and referee (for injuries, odds, predictions)
+            fixture_id, referee = await self._find_fixture_id(home_id, away_id, match_date, client)
 
             # Fetch data in parallel
             h2h_task = self._client.get(
@@ -421,6 +537,30 @@ class ApiFootballStatsCollector:
                         bookmakers = odds_response[0].get("bookmakers", [])
                         odds = _parse_odds(bookmakers)
 
+            # Fetch match statistics (opt-in, costs extra API calls)
+            if self._fetch_match_stats:
+                stats_tasks = []
+                if home_form:
+                    stats_tasks.append(self._fetch_form_stats(home_form, home_id, client))
+                if away_form:
+                    stats_tasks.append(self._fetch_form_stats(away_form, away_id, client))
+                if stats_tasks:
+                    stats_results = await asyncio.gather(*stats_tasks, return_exceptions=True)
+                    idx = 0
+                    if home_form:
+                        r = stats_results[idx]
+                        if isinstance(r, TeamFormStats):
+                            home_form.form_stats = r
+                        idx += 1
+                    if away_form:
+                        r = stats_results[idx]
+                        if isinstance(r, TeamFormStats):
+                            away_form.form_stats = r
+
+            # Compute fixture congestion
+            home_rest, home_avg_gap = _compute_rest_days(home_form, match_date)
+            away_rest, away_avg_gap = _compute_rest_days(away_form, match_date)
+
             return MatchStats(
                 home_team=home_team,
                 away_team=away_team,
@@ -437,6 +577,11 @@ class ApiFootballStatsCollector:
                 away_injuries=away_injuries,
                 odds=odds,
                 match_date=match_date,
+                referee=referee,
+                home_rest_days=home_rest,
+                away_rest_days=away_rest,
+                home_avg_days_between=home_avg_gap,
+                away_avg_days_between=away_avg_gap,
             )
 
     async def research_all_matches(
