@@ -39,6 +39,9 @@ from toto_ai.console import console
     help="Mark a form number as already submitted and exit",
 )
 @click.option("--test", is_flag=True, help="Backtest against a past results form (prompts for URL)")
+@click.option("--download-data", is_flag=True, help="Download historical match CSVs from football-data.co.uk")
+@click.option("--force-download", is_flag=True, help="Re-download existing CSV files")
+@click.option("--train-model", is_flag=True, help="Train CatBoost models from historical data")
 def main(
     dry_run: bool,
     no_research: bool,
@@ -47,6 +50,9 @@ def main(
     schedule: bool,
     mark_submitted: str | None,
     test: bool,
+    download_data: bool,
+    force_download: bool,
+    train_model: bool,
 ) -> None:
     """Analyze the current Winner 16 form and predict outcomes using AI models."""
     if test:
@@ -62,6 +68,25 @@ def main(
         console.print("[bold blue]Toto AI - Backtesting Mode[/bold blue]")
         console.print()
         asyncio.run(run_test_pipeline(url=url, no_research=no_research, premium=premium))
+        return
+
+    if download_data:
+        from toto_ai.config import settings
+        from toto_ai.data_collector.football_data_downloader import FootballDataDownloader
+
+        console.print("[bold blue]Toto AI - Historical Data Download[/bold blue]")
+        console.print()
+        downloader = FootballDataDownloader(data_dir=settings.FOOTBALL_DATA_DIR)
+        asyncio.run(downloader.download_all(force=force_download))
+        return
+
+    if train_model:
+        from toto_ai.config import settings
+        from toto_ai.ml.train import run_training
+
+        console.print("[bold blue]Toto AI - CatBoost Model Training[/bold blue]")
+        console.print()
+        run_training(data_dir=settings.FOOTBALL_DATA_DIR, model_dir=settings.MODEL_DIR)
         return
 
     if mark_submitted:

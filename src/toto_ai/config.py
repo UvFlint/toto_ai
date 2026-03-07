@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     # Submission tracker
     TRACKER_FILE: str = "data/submissions.json"
 
+    # Historical data collection
+    FOOTBALL_DATA_DIR: str = "data/football_data"
+
+    # CatBoost ML models
+    MODEL_DIR: str = "data/models"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

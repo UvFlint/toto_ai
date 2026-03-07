@@ -25,6 +25,8 @@ def _union_for_match(report: FullReport, match_number: int) -> tuple[str, str]:
     """Return (union_str, color) for a match across all model columns."""
     seen: set[str] = set()
     for col in report.columns:
+        if col.column_type != "ai":
+            continue
         for pred in col.predictions:
             if pred.match_number == match_number:
                 seen.add(pred.prediction)

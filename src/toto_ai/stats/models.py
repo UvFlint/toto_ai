@@ -149,3 +149,7 @@ class MatchStats(BaseModel):
     away_avg_days_between: float | None = None
     # Poisson/Dixon-Coles model probabilities
     poisson_probs: PoissonProbabilities | None = None
+    # CatBoost ML model probabilities
+    catboost_probs: dict[str, float] | None = None
+    # XGBoost ML model probabilities
+    xgboost_probs: dict[str, float] | None = None

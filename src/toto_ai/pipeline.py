@@ -512,6 +512,28 @@ async def run_pipeline(
         )
         console.print()
 
+        # ── Step 2d: CatBoost ML Probabilities ──────────────────────
+        console.rule("[bold]Step 2d: CatBoost ML Probabilities[/bold]")
+        from toto_ai.ml.catboost_model import enrich_stats_with_catboost
+
+        enrich_stats_with_catboost(form.matches, stats)
+        cb_count = sum(1 for s in stats if s.catboost_probs)
+        console.print(
+            f"[green]CatBoost probabilities computed for {cb_count}/{len(form.matches)} matches[/green]"
+        )
+        console.print()
+
+        # ── Step 2e: XGBoost ML Probabilities ──────────────────────
+        console.rule("[bold]Step 2e: XGBoost ML Probabilities[/bold]")
+        from toto_ai.ml.xgboost_model import enrich_stats_with_xgboost
+
+        enrich_stats_with_xgboost(form.matches, stats)
+        xgb_count = sum(1 for s in stats if s.xgboost_probs)
+        console.print(
+            f"[green]XGBoost probabilities computed for {xgb_count}/{len(form.matches)} matches[/green]"
+        )
+        console.print()
+
         # ── Step 3: News Gathering ────────────────────────────────────
         console.rule("[bold]Step 3: Gathering News[/bold]")
         await _gather_news(form.matches, stats, no_research)
@@ -675,6 +697,28 @@ async def run_test_pipeline(
             computed += 1
     console.print(
         f"[green]Poisson probabilities computed for {computed}/{len(form.matches)} matches[/green]"
+    )
+    console.print()
+
+    # Step 2d: CatBoost ML Probabilities
+    console.rule("[bold]Step 2d: CatBoost ML Probabilities[/bold]")
+    from toto_ai.ml.catboost_model import enrich_stats_with_catboost
+
+    enrich_stats_with_catboost(form.matches, stats)
+    cb_count = sum(1 for s in stats if s.catboost_probs)
+    console.print(
+        f"[green]CatBoost probabilities computed for {cb_count}/{len(form.matches)} matches[/green]"
+    )
+    console.print()
+
+    # Step 2e: XGBoost ML Probabilities
+    console.rule("[bold]Step 2e: XGBoost ML Probabilities[/bold]")
+    from toto_ai.ml.xgboost_model import enrich_stats_with_xgboost
+
+    enrich_stats_with_xgboost(form.matches, stats)
+    xgb_count = sum(1 for s in stats if s.xgboost_probs)
+    console.print(
+        f"[green]XGBoost probabilities computed for {xgb_count}/{len(form.matches)} matches[/green]"
     )
     console.print()
 

@@ -29,6 +29,10 @@ PPDA indicates pressing intensity (lower = more aggressive pressing)
 starting point based on team strength and historical goal rates. Use as a sanity check — if your \
 analysis strongly disagrees, explain why. The model does NOT account for injuries, motivation, \
 tactical changes, or cup context.
+11. **ML Models (CatBoost & XGBoost)** (when provided): Machine learning predictions trained on \
+100K+ historical matches with odds, form, and match stats. Two independent models give calibrated \
+outcome probabilities. Treat as data-driven signals alongside Poisson — if multiple statistical \
+models agree, weigh that heavily.
 
 ## Important Guidelines
 - Be HONEST about uncertainty. Don't force a prediction if the match is truly unpredictable
@@ -177,6 +181,20 @@ def build_match_data_prompt(
             section += f"- P(Home win): {pp['home_win']:.1%}\n"
             section += f"- P(Draw): {pp['draw']:.1%}\n"
             section += f"- P(Away win): {pp['away_win']:.1%}\n"
+
+        if match.get("catboost_probs"):
+            cp = match["catboost_probs"]
+            section += "\n### ML Model (CatBoost)\n"
+            section += f"- P(Home win): {cp['1']:.1%}\n"
+            section += f"- P(Draw): {cp['X']:.1%}\n"
+            section += f"- P(Away win): {cp['2']:.1%}\n"
+
+        if match.get("xgboost_probs"):
+            xp = match["xgboost_probs"]
+            section += "\n### ML Model (XGBoost)\n"
+            section += f"- P(Home win): {xp['1']:.1%}\n"
+            section += f"- P(Draw): {xp['X']:.1%}\n"
+            section += f"- P(Away win): {xp['2']:.1%}\n"
 
         if match.get("home_xg") or match.get("away_xg"):
             section += "\n### Expected Goals (xG) - Season Stats\n"

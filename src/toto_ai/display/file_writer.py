@@ -69,7 +69,13 @@ def write_report_to_file(report: FullReport) -> Path:
         row.append(f"{con.prediction} [{con.agreement_count}/3]" if con and con.prediction else "?")
 
         # Union (AI columns only)
-        seen: set[str] = {p.prediction for p in preds_by_model.values()}  # type: ignore[union-attr]
+        seen: set[str] = set()
+        for col in report.columns:
+            if col.column_type != "ai":
+                continue
+            p = preds_by_model.get(col.model_name)
+            if p:
+                seen.add(p.prediction)  # type: ignore[union-attr]
         union_str = "/".join(p for p in ["1", "X", "2"] if p in seen)
         row.append(union_str)
 

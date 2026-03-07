@@ -262,4 +262,4 @@ def build_poisson_column(
 
     console.print(f"[green]Poisson/DC model: {len(predictions)} predictions generated[/green]")
 
-    return FullColumn(model_name="Poisson/DC", predictions=predictions)
+    return FullColumn(model_name="Poisson/DC", predictions=predictions, column_type="statistical")

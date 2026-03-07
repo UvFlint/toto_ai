@@ -32,6 +32,7 @@ class FullColumn(BaseModel):
     model_name: str
     predictions: list[MatchPrediction] = Field(description="Exactly 16 match predictions")
     usage: ModelCost = Field(default_factory=ModelCost)
+    column_type: Literal["ai", "statistical", "ml"] = "ai"
 
 
 class ConsensusMatch(BaseModel):
