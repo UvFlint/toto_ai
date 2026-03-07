@@ -11,6 +11,7 @@ from toto_ai.console import console
 
 WINNER_BASE_URL = "https://www.winner.co.il"
 WINNER16_PATH = "/%D7%9E%D7%A9%D7%97%D7%A7%D7%99%D7%9D/%D7%95%D7%95%D7%99%D7%A0%D7%A8-16"
+WINNER16_SUBMIT_PATH = "/%D7%9E%D7%A9%D7%97%D7%A7%D7%99%D7%9D/%D7%95%D7%95%D7%99%D7%A0%D7%A8-16/%D7%A8%D7%92%D7%99%D7%9C"
 
 
 class WinnerScraper:

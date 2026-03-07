@@ -5,7 +5,7 @@ from typing import Literal
 
 from toto_ai.analyzer.models import FullReport
 from toto_ai.config import settings
-from toto_ai.scraper.winner_scraper import WINNER_BASE_URL, WINNER16_PATH
+from toto_ai.scraper.winner_scraper import WINNER_BASE_URL, WINNER16_SUBMIT_PATH
 from toto_ai.submitter.models import SubmissionColumn, SubmissionResult
 from toto_ai.console import console
 
@@ -100,10 +100,15 @@ class WinnerSubmitter:
         from selenium.webdriver.support.ui import WebDriverWait
 
         console.print("[dim]Logging in to winner.co.il...[/dim]")
-        driver.get(WINNER_BASE_URL)  # type: ignore[attr-defined]
+        driver.get(WINNER_BASE_URL + WINNER16_SUBMIT_PATH)  # type: ignore[attr-defined]
 
         # Wait for and dismiss ZoomEngage popup (appears on page load)
         self._dismiss_zoom_engage(driver, wait_secs=10)
+
+        # Page renders broken on direct navigation — refresh fixes it
+        driver.refresh()  # type: ignore[attr-defined]
+        time.sleep(3)
+        self._dismiss_zoom_engage(driver, wait_secs=3)
 
         # Click login button (ZoomEngage is gone so click registers)
         login_btn = None
@@ -224,7 +229,7 @@ class WinnerSubmitter:
         from selenium.webdriver.support.ui import WebDriverWait
 
         console.print("[dim]Navigating to Winner 16 form...[/dim]")
-        driver.get(WINNER_BASE_URL + WINNER16_PATH)  # type: ignore[attr-defined]
+        driver.get(WINNER_BASE_URL + WINNER16_SUBMIT_PATH)  # type: ignore[attr-defined]
 
         WebDriverWait(driver, 15).until(  # type: ignore[arg-type]
             EC.presence_of_element_located((By.CSS_SELECTOR, "[id^='bet-button-']"))
