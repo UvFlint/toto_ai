@@ -62,6 +62,36 @@ class OddsData(BaseModel):
     away_odds: float = 0.0
 
 
+class TeamXG(BaseModel):
+    """Season-level xG stats from understat.com."""
+
+    team_name: str
+    matches_played: int = 0
+    # Core xG
+    xg: float = 0.0
+    xga: float = 0.0
+    npxg: float = 0.0
+    npxga: float = 0.0
+    npxgd: float = 0.0
+    # Performance vs expectation
+    actual_goals: int = 0
+    actual_goals_against: int = 0
+    xg_diff: float = 0.0  # actual_goals - xg
+    xga_diff: float = 0.0  # actual_goals_against - xga
+    # Expected points
+    xpts: float = 0.0
+    actual_pts: int = 0
+    xpts_diff: float = 0.0  # actual_pts - xpts
+    # Pressing & advanced
+    ppda: float = 0.0  # lower = more pressing
+    oppda: float = 0.0
+    dc: int = 0  # deep completions
+    odc: int = 0
+    # Per-game averages
+    xg_per_game: float = 0.0
+    xga_per_game: float = 0.0
+
+
 class MatchStats(BaseModel):
     """All gathered statistics for a single match."""
 
@@ -81,3 +111,5 @@ class MatchStats(BaseModel):
     home_injuries: list[InjuryInfo] = []
     away_injuries: list[InjuryInfo] = []
     odds: OddsData | None = None
+    home_xg: TeamXG | None = None
+    away_xg: TeamXG | None = None

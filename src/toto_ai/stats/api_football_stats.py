@@ -180,7 +180,6 @@ def _parse_odds(odds_data: list[dict]) -> OddsData | None:
     return None
 
 
-
 class ApiFootballStatsCollector:
     """Collect match statistics from API-Football v3."""
 
@@ -391,16 +390,10 @@ class ApiFootballStatsCollector:
                         f"{league_id} → {new_league_id}[/dim]"
                     )
                     self._mapper.update_league_id(home_team, new_league_id)
-                    retry_standings = await self._fetch_standings(
-                        new_league_id, season, client
-                    )
+                    retry_standings = await self._fetch_standings(new_league_id, season, client)
                     if retry_standings:
-                        home_standing = _find_standing(
-                            retry_standings, home_id, home_english
-                        )
-                        away_standing = _find_standing(
-                            retry_standings, away_id, away_english
-                        )
+                        home_standing = _find_standing(retry_standings, home_id, home_english)
+                        away_standing = _find_standing(retry_standings, away_id, away_english)
 
             # Parse injuries
             home_injuries: list[InjuryInfo] = []

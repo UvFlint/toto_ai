@@ -128,6 +128,32 @@ async def _research_stats(
     return stats
 
 
+async def _enrich_xg(
+    matches: list[Match],
+    stats: list[MatchStats],
+    skip: bool,
+) -> None:
+    """Enrich stats with understat xG data for supported European leagues."""
+    if skip:
+        console.print("[dim]Skipping xG enrichment[/dim]")
+        return
+
+    from toto_ai.config import settings
+
+    if not settings.UNDERSTAT_ENABLED:
+        console.print("[dim]xG enrichment disabled[/dim]")
+        return
+
+    try:
+        from toto_ai.stats.understat_stats import UnderstatCollector
+
+        collector = UnderstatCollector()
+        leagues = [m.league for m in matches]
+        await collector.enrich_match_stats(stats, leagues)
+    except Exception as e:
+        console.print(f"[yellow]xG enrichment failed (non-critical): {e}[/yellow]")
+
+
 async def _gather_news(
     matches: list[Match],
     stats: list[MatchStats],
@@ -141,9 +167,7 @@ async def _gather_news(
     await gather_news(stats, matches)
 
 
-def _verify_enrichment(
-    matches: list[Match], stats: list[MatchStats]
-) -> tuple[bool, bool]:
+def _verify_enrichment(matches: list[Match], stats: list[MatchStats]) -> tuple[bool, bool]:
     """Log a summary table of data coverage per match and warn about gaps.
 
     Returns (critical_gaps, warnings) where critical_gaps blocks the pipeline
@@ -159,6 +183,7 @@ def _verify_enrichment(
     table.add_column("Away Form", justify="center", width=10)
     table.add_column("Standings", justify="center", width=10)
     table.add_column("News", justify="center", width=5)
+    table.add_column("xG", justify="center", width=4)
 
     ok = "[green]OK[/green]"
     gap = "[red]MISS[/red]"
@@ -220,6 +245,29 @@ def _verify_enrichment(
             nw_cell = warn
             warning_issues.append("News")
 
+        # xG (non-critical, only available for supported European leagues)
+        if s and (s.home_xg or s.away_xg):
+            xg_cell = ok
+        elif match.league and any(
+            match.league.startswith(p)
+            for p in (
+                "פרמייר",
+                "Premier",
+                "לה ליגה",
+                "La Liga",
+                "בונדס",
+                "Bundes",
+                "סרייה",
+                "Serie",
+                "ליג 1",
+                "Ligue",
+            )
+        ):
+            xg_cell = warn
+            warning_issues.append("xG")
+        else:
+            xg_cell = "[dim]N/A[/dim]"
+
         table.add_row(
             str(match.match_number),
             label,
@@ -228,6 +276,7 @@ def _verify_enrichment(
             af_cell,
             st_cell,
             nw_cell,
+            xg_cell,
         )
 
         if critical_issues:
@@ -429,6 +478,11 @@ async def run_pipeline(
         )
         console.print()
 
+        # ── Step 2b: xG Enrichment (Understat) ────────────────────────
+        console.rule("[bold]Step 2b: xG Enrichment (Understat)[/bold]")
+        await _enrich_xg(form.matches, stats, no_research)
+        console.print()
+
         # ── Step 3: News Gathering ────────────────────────────────────
         console.rule("[bold]Step 3: Gathering News[/bold]")
         await _gather_news(form.matches, stats, no_research)
@@ -442,7 +496,9 @@ async def run_pipeline(
         if critical_gaps and not no_research and not dry_run:
             if schedule:
                 # Retry research once before giving up
-                console.print("[yellow]Critical data gaps detected. Retrying research once...[/yellow]")
+                console.print(
+                    "[yellow]Critical data gaps detected. Retrying research once...[/yellow]"
+                )
                 stats = await _research_stats(form.matches, no_research)
                 await _gather_news(form.matches, stats, no_research)
                 console.rule("[bold]Data Verification (Retry)[/bold]")
@@ -571,6 +627,11 @@ async def run_test_pipeline(
         form.matches,
         no_research,
     )
+    console.print()
+
+    # Step 2b: xG Enrichment
+    console.rule("[bold]Step 2b: xG Enrichment (Understat)[/bold]")
+    await _enrich_xg(form.matches, stats, no_research)
     console.print()
 
     # Step 3: News gathering

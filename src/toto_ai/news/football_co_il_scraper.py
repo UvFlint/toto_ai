@@ -18,9 +18,7 @@ _HEADERS = {
 }
 
 
-async def fetch_football_co_il_news(
-    team_name: str, client: httpx.AsyncClient
-) -> list[str]:
+async def fetch_football_co_il_news(team_name: str, client: httpx.AsyncClient) -> list[str]:
     """Fetch recent articles mentioning *team_name* from football.co.il RSS feed.
 
     Returns up to 5 matching article titles. Returns an empty list on any error.
@@ -58,7 +56,5 @@ async def fetch_football_co_il_news(
 
         return articles
     except Exception as exc:
-        console.print(
-            f"[dim]football.co.il fetch failed for '{team_name}': {exc}[/dim]"
-        )
+        console.print(f"[dim]football.co.il fetch failed for '{team_name}': {exc}[/dim]")
         return []

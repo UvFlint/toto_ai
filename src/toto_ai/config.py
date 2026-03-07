@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     EMAIL_PASSWORD: str = ""  # Gmail App Password
     EMAIL_RECIPIENT: str = "yuvalm121212@gmail.com"
 
+    # Understat xG enrichment
+    UNDERSTAT_ENABLED: bool = True
+
     # Submission tracker
     TRACKER_FILE: str = "data/submissions.json"
 

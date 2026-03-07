@@ -45,9 +45,7 @@ async def _search_match_news(
             result = await _NEWS_AGENT.run(prompt)
             return result.output
         except Exception as e:
-            console.print(
-                f"[yellow]Web search failed for {home} vs {away}: {e}[/yellow]"
-            )
+            console.print(f"[yellow]Web search failed for {home} vs {away}: {e}[/yellow]")
             return ""
 
 
@@ -100,9 +98,7 @@ async def gather_news(
             stats[idx].news = news_text
             web_success += 1
 
-    console.print(
-        f"[dim]Web search complete: {web_success}/{total} matches[/dim]"
-    )
+    console.print(f"[dim]Web search complete: {web_success}/{total} matches[/dim]")
 
     # Phase 2: Israeli sources (one.co.il + football.co.il) for Israeli teams only
     israeli_indices: list[int] = [
@@ -134,9 +130,7 @@ async def gather_news(
                     israeli_articles.extend(f"- {a}" for a in fc_home + fc_away)
 
                 if israeli_articles:
-                    israeli_section = (
-                        "\n\n[Israeli sources]\n" + "\n".join(israeli_articles)
-                    )
+                    israeli_section = "\n\n[Israeli sources]\n" + "\n".join(israeli_articles)
                     stats[i].news = (stats[i].news or "") + israeli_section
 
                 article_count = len(one_home) + len(one_away) + len(fc_home) + len(fc_away)
@@ -146,12 +140,9 @@ async def gather_news(
                         f"[dim]  [{il_n}/{il_total}] {label} — {article_count} articles[/dim]"
                     )
                 else:
-                    console.print(
-                        f"[yellow]  [{il_n}/{il_total}] {label} — no articles[/yellow]"
-                    )
+                    console.print(f"[yellow]  [{il_n}/{il_total}] {label} — no articles[/yellow]")
 
     total_with_news = sum(1 for s in stats if s.news)
     console.print(
-        f"[green]News gathering complete: "
-        f"{total_with_news}/{len(stats)} matches have news[/green]"
+        f"[green]News gathering complete: {total_with_news}/{len(stats)} matches have news[/green]"
     )

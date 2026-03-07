@@ -22,6 +22,9 @@ For each match, consider these factors in order of importance:
 6. **Motivation**: Title race, relegation battle, nothing to play for
 7. **Fixture Congestion**: Midweek games, rotation risk
 8. **Injuries/Suspensions**: Missing key players significantly affect match outcomes
+9. **Expected Goals (xG)** (when available): xG vs actual goals reveals over/underperformance. \
+Teams scoring well above xG are due for regression. xPTS vs actual points shows "lucky" teams. \
+PPDA indicates pressing intensity (lower = more aggressive pressing)
 
 ## Important Guidelines
 - Be HONEST about uncertainty. Don't force a prediction if the match is truly unpredictable
@@ -128,6 +131,25 @@ def build_match_data_prompt(
             od = match["odds"]
             section += "\n### Betting Odds\n"
             section += f"- {od.get('bookmaker', 'N/A')}: 1={od.get('home_odds', 'N/A')} X={od.get('draw_odds', 'N/A')} 2={od.get('away_odds', 'N/A')}\n"
+
+        if match.get("home_xg") or match.get("away_xg"):
+            section += "\n### Expected Goals (xG) - Season Stats\n"
+            for side, key in [("home", "home_xg"), ("away", "away_xg")]:
+                xg = match.get(key)
+                if xg:
+                    team = match[f"{side}_team"]
+                    section += (
+                        f"**{team}** ({xg['matches_played']} matches):\n"
+                        f"- xG: {xg['xg']:.1f} ({xg['xg_per_game']:.2f}/game)"
+                        f" | Actual goals: {xg['actual_goals']}"
+                        f" (diff: {xg['xg_diff']:+.1f})\n"
+                        f"- xGA: {xg['xga']:.1f} ({xg['xga_per_game']:.2f}/game)"
+                        f" | Actual conceded: {xg['actual_goals_against']}"
+                        f" (diff: {xg['xga_diff']:+.1f})\n"
+                        f"- xPTS: {xg['xpts']:.1f} vs Actual: {xg['actual_pts']}"
+                        f" (diff: {xg['xpts_diff']:+.1f})\n"
+                        f"- PPDA: {xg['ppda']:.1f} (pressing intensity)\n"
+                    )
 
         if (
             match.get("news")

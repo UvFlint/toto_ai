@@ -121,6 +121,10 @@ def _prepare_match_data(matches: list[Match], stats: list[MatchStats]) -> list[d
                 entry["away_injuries"] = [inj.model_dump() for inj in s.away_injuries]
             if s.odds:
                 entry["odds"] = s.odds.model_dump()
+            if s.home_xg:
+                entry["home_xg"] = s.home_xg.model_dump()
+            if s.away_xg:
+                entry["away_xg"] = s.away_xg.model_dump()
         data.append(entry)
     return data
 

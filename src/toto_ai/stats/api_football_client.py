@@ -92,8 +92,7 @@ class ApiFootballClient:
                     if attempt < max_retries:
                         wait = 2 ** (attempt + 1)
                         console.print(
-                            f"[yellow]Rate limited ({endpoint}). "
-                            f"Retrying in {wait}s...[/yellow]"
+                            f"[yellow]Rate limited ({endpoint}). Retrying in {wait}s...[/yellow]"
                         )
                         await asyncio.sleep(wait)
                         continue
