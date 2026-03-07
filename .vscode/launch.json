@@ -1,0 +1,68 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "toto",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "toto_ai.main",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "toto --dry-run",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "toto_ai.main",
+      "args": ["--dry-run"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "toto --dry-run --no-stats --no-news",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "toto_ai.main",
+      "args": ["--dry-run", "--no-stats", "--no-news"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "toto --premium --test",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "toto_ai.main",
+      "args": ["--premium", "--test"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "toto --test",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "toto_ai.main",
+      "args": ["--test"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "toto --premium",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "toto_ai.main",
+      "args": ["--premium"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env"
+    },
+    {
+      "name": "toto --premium --send-auto",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "toto_ai.main",
+      "args": ["--premium", "--send-auto"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env"
+    }
+  ]
+}

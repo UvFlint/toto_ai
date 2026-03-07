@@ -1,0 +1,16 @@
+.env
+__pycache__/
+*.pyc
+.ruff_cache/
+.pytest_cache/
+dist/
+*.egg-info/
+.venv/
+team_cache.json
+*.pem
+apifootball_cache.json
+debug_results_dump.json
+data/
+reports/
+.mcp.json
+.claude/settings.local.json

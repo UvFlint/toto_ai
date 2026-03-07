@@ -1,0 +1,68 @@
+# ============================================================
+#  Toto AI — Docker Cheat Sheet
+# ============================================================
+
+# ── Build ────────────────────────────────────────────────────
+
+# Build the image locally
+docker build -t toto-ai .
+
+# ── Run Locally ──────────────────────────────────────────────
+
+# Smoke test (no API keys needed, uses mock data)
+docker run --rm toto-ai uv run toto --dry-run --no-news --no-stats
+
+# Full one-shot run (uses real scraping + AI analysis)
+docker run --rm --env-file .env toto-ai
+
+# Start persistent container (polls for forms, auto-submits, loops forever)
+docker run -d --name toto-ai --restart unless-stopped --env-file .env -v toto-ai-data:/app/data -v toto-ai-reports:/app/reports toto-ai
+
+# Mark a form as already submitted (replace <FORM_NUMBER>)
+docker run --rm -v toto-ai-data:/app/data toto-ai uv run toto --mark-submitted <FORM_NUMBER>
+
+# ── Monitor & Manage ────────────────────────────────────────
+
+# View recent logs
+docker logs toto-ai
+
+# Follow logs in real time
+docker logs -f toto-ai
+
+# Stop and remove the container
+docker stop toto-ai && docker rm toto-ai
+
+# ── Deploy to EC2 ───────────────────────────────────────────
+
+# Upload .env to EC2
+scp -i "TOTO_AI_KEY.pem" .env ubuntu@13.61.17.40:/home/ubuntu/toto-ai.env
+
+# Upload and run the initial setup script (first time only)
+scp -i "TOTO_AI_KEY.pem" ec2-setup.sh ubuntu@13.61.17.40:~
+ssh -i "TOTO_AI_KEY.pem" ubuntu@13.61.17.40 'bash ec2-setup.sh'
+
+# Build, tag, push to ECR, then pull & restart on EC2
+bash deploy.sh
+
+# Upload and run the EC2 run script manually (if not using deploy.sh)
+scp -i "TOTO_AI_KEY.pem" ec2-run.sh ubuntu@13.61.17.40:~
+ssh -i "TOTO_AI_KEY.pem" ubuntu@13.61.17.40 'bash ec2-run.sh'
+
+# ── EC2 Remote Monitoring ───────────────────────────────────
+
+# Check running containers on EC2
+ssh -i "TOTO_AI_KEY.pem" ubuntu@13.61.17.40 'docker ps'
+
+# View / follow logs on EC2
+ssh -i "TOTO_AI_KEY.pem" ubuntu@13.61.17.40 'docker logs toto-ai'
+ssh -i "TOTO_AI_KEY.pem" ubuntu@13.61.17.40 'docker logs -f toto-ai'
+
+# ── ECR (manual push) ───────────────────────────────────────
+
+# Authenticate Docker with AWS ECR
+aws ecr get-login-password --region eu-north-1 | \
+  docker login --username AWS --password-stdin 180294190448.dkr.ecr.eu-north-1.amazonaws.com
+
+# Tag and push the image
+docker tag toto-ai:latest 180294190448.dkr.ecr.eu-north-1.amazonaws.com/toto-ai:latest
+docker push 180294190448.dkr.ecr.eu-north-1.amazonaws.com/toto-ai:latest
