@@ -32,16 +32,25 @@ _SEARCH_PROMPT = (
     "Only include confirmed, recent information."
 )
 
+_ISRAELI_SEARCH_SUFFIX = (
+    "\nAlso search Israeli sports sources including sport5.co.il, "
+    "one.co.il, and football.co.il for Hebrew-language coverage."
+)
+
 
 async def _search_match_news(
     home: str,
     away: str,
     semaphore: asyncio.Semaphore,
+    *,
+    is_israeli: bool = False,
 ) -> str:
     """Use Gemini with WebSearchTool to find news for a single match."""
     async with semaphore:
         try:
             prompt = _SEARCH_PROMPT.format(home=home, away=away)
+            if is_israeli:
+                prompt += _ISRAELI_SEARCH_SUFFIX
             result = await _NEWS_AGENT.run(prompt)
             return result.output
         except Exception as e:
@@ -74,7 +83,8 @@ async def gather_news(
         s = stats[idx]
         home = s.home_team_english or matches[idx].home_team
         away = s.away_team_english or matches[idx].away_team
-        news = await _search_match_news(home, away, semaphore)
+        is_israeli = matches[idx].league in _ISRAELI_LEAGUE_NAMES
+        news = await _search_match_news(home, away, semaphore, is_israeli=is_israeli)
         async with count_lock:
             completed_count += 1
             n = completed_count
@@ -108,7 +118,7 @@ async def gather_news(
     if israeli_indices:
         console.print(
             f"[dim]Fetching Israeli news for {len(israeli_indices)} matches "
-            f"(one.co.il + football.co.il)...[/dim]"
+            f"(one.co.il + football.co.il + sport5.co.il via Gemini)...[/dim]"
         )
         il_total = len(israeli_indices)
         async with httpx.AsyncClient() as client:
