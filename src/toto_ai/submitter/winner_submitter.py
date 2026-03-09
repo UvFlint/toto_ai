@@ -190,8 +190,6 @@ class WinnerSubmitter:
             password_input.send_keys(Keys.RETURN)
 
         # Give the SPA time to process the auth response before polling
-        import time
-
         time.sleep(2)
 
         # Verify login succeeded by waiting for the deposit/logged-in indicator
