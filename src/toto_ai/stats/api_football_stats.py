@@ -260,6 +260,18 @@ def _parse_fixture_statistics(stats_response: list[dict], team_id: int) -> dict[
                     result["pass_accuracy"] = float(str(value).replace("%", ""))
                 except ValueError:
                     pass
+            elif stat_type == "Yellow Cards":
+                result["yellow_cards"] = float(value)
+            elif stat_type == "Red Cards":
+                result["red_cards"] = float(value)
+            elif stat_type == "Offsides":
+                result["offsides"] = float(value)
+            elif stat_type == "Shots insidebox":
+                result["shots_insidebox"] = float(value)
+            elif stat_type == "Shots outsidebox":
+                result["shots_outsidebox"] = float(value)
+            elif stat_type == "Total passes":
+                result["total_passes"] = float(value)
         return result if result else None
     return None
 
@@ -383,6 +395,12 @@ class ApiFootballStatsCollector:
             avg_blocked_shots=round(sum(s.get("blocked_shots", 0) for s in all_stats) / n, 1),
             avg_gk_saves=round(sum(s.get("gk_saves", 0) for s in all_stats) / n, 1),
             avg_pass_accuracy=round(sum(s.get("pass_accuracy", 0) for s in all_stats) / n, 1),
+            avg_yellow_cards=round(sum(s.get("yellow_cards", 0) for s in all_stats) / n, 1),
+            avg_red_cards=round(sum(s.get("red_cards", 0) for s in all_stats) / n, 1),
+            avg_offsides=round(sum(s.get("offsides", 0) for s in all_stats) / n, 1),
+            avg_shots_insidebox=round(sum(s.get("shots_insidebox", 0) for s in all_stats) / n, 1),
+            avg_shots_outsidebox=round(sum(s.get("shots_outsidebox", 0) for s in all_stats) / n, 1),
+            avg_total_passes=round(sum(s.get("total_passes", 0) for s in all_stats) / n, 1),
             matches_with_stats=n,
         )
 

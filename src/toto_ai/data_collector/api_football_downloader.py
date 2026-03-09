@@ -36,6 +36,10 @@ STAT_MAP: dict[str, tuple[str, str]] = {
     "Blocked Shots": ("HBS", "ABS"),
     "Goalkeeper Saves": ("HGS", "AGS"),
     "Passes %": ("HPP", "APP"),
+    "Offsides": ("HOff", "AOff"),
+    "Shots insidebox": ("HSib", "ASib"),
+    "Shots outsidebox": ("HSob", "ASob"),
+    "Total passes": ("HTP", "ATP"),
 }
 
 # Stat types whose API values contain a '%' suffix (e.g. "55%")
@@ -72,6 +76,14 @@ CSV_COLUMNS = [
     "AGS",
     "HPP",
     "APP",
+    "HOff",
+    "AOff",
+    "HSib",
+    "ASib",
+    "HSob",
+    "ASob",
+    "HTP",
+    "ATP",
     "B365H",
     "B365D",
     "B365A",

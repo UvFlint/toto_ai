@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     UNDERSTAT_ENABLED: bool = True
 
     # API-Football match statistics (opt-in, costs extra API calls)
-    API_FOOTBALL_FETCH_MATCH_STATS: bool = False
+    API_FOOTBALL_FETCH_MATCH_STATS: bool = True
 
     # Submission tracker
     TRACKER_FILE: str = "data/submissions.json"

@@ -38,6 +38,12 @@ class TeamFormStats(BaseModel):
     avg_blocked_shots: float = 0.0
     avg_gk_saves: float = 0.0
     avg_pass_accuracy: float = 0.0
+    avg_yellow_cards: float = 0.0
+    avg_red_cards: float = 0.0
+    avg_offsides: float = 0.0
+    avg_shots_insidebox: float = 0.0
+    avg_shots_outsidebox: float = 0.0
+    avg_total_passes: float = 0.0
     matches_with_stats: int = 0
 
 
@@ -156,7 +162,5 @@ class MatchStats(BaseModel):
     poisson_probs: PoissonProbabilities | None = None
     # CatBoost ML model probabilities
     catboost_probs: dict[str, float] | None = None
-    # XGBoost ML model probabilities
-    xgboost_probs: dict[str, float] | None = None
     # Structured news categorization
     news_analysis: MatchNewsAnalysis | None = None

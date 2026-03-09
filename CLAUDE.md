@@ -3,7 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
-CLI tool that analyzes Winner 16 football betting forms from winner.co.il. Multiple AI models (OpenAI, Google, Anthropic, DeepSeek) plus ML models (CatBoost, XGBoost) and a Poisson/Dixon-Coles statistical model each produce a prediction column; results include consensus, union column for multi-column betting with cost estimate, and optional auto-submission to winner.co.il.
+CLI tool that analyzes Winner 16 football betting forms from winner.co.il. 4 AI models (OpenAI, Google, Anthropic, DeepSeek) each produce a prediction column informed by CatBoost ML and Poisson/Dixon-Coles statistical probabilities; results include consensus, union column for multi-column betting with cost estimate, and optional auto-submission to winner.co.il.
 
 ## Commands
 - Run: `uv run toto`
@@ -27,8 +27,10 @@ CLI tool that analyzes Winner 16 football betting forms from winner.co.il. Multi
 - Python 3.11+, uv package manager, hatchling build
 - pydantic-ai for AI agents with structured output (`list[MatchPrediction]`)
 - Selenium (Chrome) for web scraping (winner.co.il is a JS SPA)
-- Perplexity sonar-pro for match research (stats, news, odds via web search)
-- CatBoost, XGBoost, scikit-learn, pandas for ML prediction models
+- API-Football v3 for match data (H2H, form, standings, injuries, odds)
+- Understat for xG metrics enrichment
+- Gemini 2.5-flash for web news search + news categorization
+- CatBoost, scikit-learn, pandas for ML prediction models
 - Rich for console output, Click for CLI
 - pydantic-settings for config (loads from `.env`)
 
@@ -39,18 +41,24 @@ src/toto_ai/
   main.py          # CLI entry point (Click), UTF-8 setup, .env loading
   pipeline.py      # Orchestration: fetch -> research -> ML -> AI -> display -> submit
   config.py        # pydantic-settings Settings class (all env vars)
+  calibration.py   # Post-odds multiplier tracking + weekly accuracy reviews
   console.py       # Shared Rich Console instance
-  perplexity.py    # Perplexity model factory (sonar-pro) + deep research
+  review.py        # Post-results analysis (predictions vs actuals)
   tracker.py       # SubmissionTracker — JSON file tracking submitted forms
   scraper/         # Selenium scraper for winner.co.il + form validation
     models.py      # Match, WinnerForm pydantic models
     winner_scraper.py  # WinnerScraper + create_mock_form()
-  stats/           # Match research via Perplexity sonar-pro
+  stats/           # Match research via API-Football v3 + Understat
     models.py      # MatchStats, H2H, TeamForm, Standing, PoissonProbabilities
-    perplexity_stats.py # PerplexityStatsCollector — per-match web research
+    api_football_stats.py  # Match data collection from API-Football v3
+    api_football_client.py # Async HTTP client with rate limiting + retry
+    understat_stats.py     # xG enrichment from understat.com (top 5 leagues)
+    team_mapper.py         # Hebrew team name → API-Football ID resolution + cache
     poisson.py     # Poisson/Dixon-Coles statistical model (pure Python, no ML deps)
-  news/            # Supplemental news sources
-    one_scraper.py # one.co.il Israeli sports news supplement
+  news/            # News gathering + categorization
+    collector.py   # Gemini web search + Israeli sources (one.co.il, football.co.il)
+    categorizer.py # Structured news categorization via Gemini
+    one_scraper.py # one.co.il Israeli sports news scraper
   data_collector/  # Historical match data
     football_data_downloader.py  # Async downloader for football-data.co.uk CSVs
     api_football_downloader.py   # Israeli league data from API-Football (fixtures, stats, odds)
@@ -60,8 +68,7 @@ src/toto_ai/
     pi_ratings.py    # Pi-Rating team strength (goal-difference model)
     glicko2.py       # Glicko-2 ratings (Bayesian with uncertainty/volatility)
     catboost_model.py  # CatBoost training + inference
-    xgboost_model.py   # XGBoost training + inference
-    train.py         # Training entry point (trains both models)
+    train.py         # Training entry point
   analyzer/        # AI prediction engine
     models.py      # MatchPrediction, FullColumn (column_type: ai/statistical/ml), FullReport
     agent.py       # Model configs, agent creation, parallel execution
@@ -79,14 +86,14 @@ src/toto_ai/
 
 ## Key Design Patterns
 
-- **Pipeline flow** (`pipeline.py`): fetch form -> validate -> research matches (Perplexity) -> supplement with one.co.il -> verify data coverage -> Poisson/CatBoost/XGBoost enrichment -> AI analysis -> display -> email -> submit. In `--schedule` mode this loops with polling.
-- **Per-match research** (`perplexity_stats.py`): Each match gets a single Perplexity sonar-pro call that returns H2H, form, standings, injuries, news, and odds as structured output. Runs 16 calls with 4x concurrency via asyncio semaphore.
+- **Pipeline flow** (`pipeline.py`): fetch form -> validate -> research matches (API-Football) -> xG enrichment (Understat) -> news (Gemini + Israeli sources) -> categorize news -> verify data coverage -> Poisson/CatBoost enrichment -> AI analysis -> display -> email -> submit. In `--schedule` mode this loops with polling.
+- **Per-match research** (`api_football_stats.py`): Each match gets structured API calls (H2H, form, standings, injuries, odds) via API-Football v3. TeamMapper resolves Hebrew names to API IDs with persistent cache. 4x concurrency via asyncio semaphore.
 - **AI models run in parallel** via `asyncio.gather` in `analyzer/agent.py`. Each model returns `list[MatchPrediction]` (structured output). Failed models are filtered out.
-- **6-way consensus**: 3 AI model columns + Poisson + CatBoost + XGBoost columns all participate in consensus voting. Each column is a `FullColumn` with `column_type` ("ai", "statistical", or "ml").
+- **4-way AI consensus**: 4 AI model columns (GPT-4o, Gemini, Claude, DeepSeek) vote on predictions. Poisson and CatBoost probabilities are provided as input data to each AI model but do not vote independently.
 - **Standard vs Premium tiers**: `MODELS_STANDARD` and `MODELS_PREMIUM` in `agent.py` define model lists. Premium adds reasoning/thinking settings per model.
 - **DeepSeek** uses OpenAI-compatible provider with custom base URL.
 - **ML model tiers**: Rich model (main leagues, ~60 features including match stats) vs Simple model (all leagues, ~15 features). League code determines which model is used at inference.
-- **Rating systems**: Pi-Ratings (goal-difference based) and Glicko-2 (Bayesian with uncertainty/volatility) are computed from historical data and shared across CatBoost and XGBoost as features.
+- **Rating systems**: Pi-Ratings (goal-difference based) and Glicko-2 (Bayesian with uncertainty/volatility) are computed from historical data and used as CatBoost features.
 - **Inference-only features**: 17 features (rest days, H2H, injuries, xG, standings) are NaN during training and populated from live MatchStats at prediction time.
 - **Poisson/Dixon-Coles** (`stats/poisson.py`): Pure-Python statistical baseline using standings/form/xG data with Dixon-Coles low-score correction. No ML dependencies.
 - **Form validation** (`_validate_form`): Guards against scraping UI navigation text or maintenance pages instead of real matches.
@@ -94,11 +101,11 @@ src/toto_ai/
 
 ## Data Directories
 - `data/football_data/` — historical match CSVs from football-data.co.uk (35+ divisions, 32 years)
-- `data/models/` — trained ML models (`catboost_rich.cbm`, `catboost_simple.cbm`, `xgboost_rich.json`, `xgboost_simple.json`, `pi_ratings.pkl`, `glicko2_ratings.pkl`, `xgb_label_encoders.pkl`)
+- `data/models/` — trained ML models (`catboost_rich.cbm`, `catboost_simple.cbm`, `pi_ratings.pkl`, `glicko2_ratings.pkl`)
 
 ## Environment Variables
 All configured via `.env` file (see `.env.example`). Key vars:
-- `PERPLEXITY_API_KEY` — required for match research (Perplexity sonar-pro)
+- `API_FOOTBALL_API_KEY` — required for match research (API-Football v3)
 - `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY` — AI providers
 - `WINNER_USERNAME`, `WINNER_PASSWORD` — winner.co.il login for auto-submission
 - `EMAIL_SENDER`, `EMAIL_PASSWORD`, `EMAIL_RECIPIENT` — Gmail SMTP notification

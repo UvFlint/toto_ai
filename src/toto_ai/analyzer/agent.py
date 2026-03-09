@@ -139,8 +139,6 @@ def _prepare_match_data(matches: list[Match], stats: list[MatchStats]) -> list[d
                 entry["poisson_probs"] = s.poisson_probs.model_dump()
             if s.catboost_probs:
                 entry["catboost_probs"] = s.catboost_probs
-            if s.xgboost_probs:
-                entry["xgboost_probs"] = s.xgboost_probs
             if s.news_analysis and s.news_analysis.items:
                 entry["news_analysis"] = {
                     "items": [item.model_dump() for item in s.news_analysis.items],
@@ -273,27 +271,6 @@ async def analyze_matches(
     tasks = [_run_single_model(model_id, model_name, prompt) for model_id, model_name in models]
     columns = await asyncio.gather(*tasks)
     columns = [c for c in columns if c.predictions]  # Filter out failed models
-
-    # Add Poisson/Dixon-Coles statistical model as a voting column
-    from toto_ai.stats.poisson import build_poisson_column
-
-    poisson_col = build_poisson_column(matches, stats)
-    if poisson_col.predictions:
-        columns.append(poisson_col)
-
-    # Add CatBoost ML model as a voting column
-    from toto_ai.ml.catboost_model import build_catboost_column
-
-    catboost_col = build_catboost_column(matches, stats)
-    if catboost_col.predictions:
-        columns.append(catboost_col)
-
-    # Add XGBoost ML model as a voting column
-    from toto_ai.ml.xgboost_model import build_xgboost_column
-
-    xgb_col = build_xgboost_column(matches, stats)
-    if xgb_col.predictions:
-        columns.append(xgb_col)
 
     if not columns:
         console.print("[red]All models failed. Cannot produce report.[/red]")
