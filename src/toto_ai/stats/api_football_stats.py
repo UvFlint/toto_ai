@@ -251,6 +251,15 @@ def _parse_fixture_statistics(stats_response: list[dict], team_id: int) -> dict[
                 result["corners"] = float(value)
             elif stat_type == "Fouls":
                 result["fouls"] = float(value)
+            elif stat_type == "Blocked Shots":
+                result["blocked_shots"] = float(value)
+            elif stat_type == "Goalkeeper Saves":
+                result["gk_saves"] = float(value)
+            elif stat_type == "Passes %":
+                try:
+                    result["pass_accuracy"] = float(str(value).replace("%", ""))
+                except ValueError:
+                    pass
         return result if result else None
     return None
 
@@ -371,6 +380,9 @@ class ApiFootballStatsCollector:
             avg_shots_on_target=round(sum(s.get("shots_on_target", 0) for s in all_stats) / n, 1),
             avg_corners=round(sum(s.get("corners", 0) for s in all_stats) / n, 1),
             avg_fouls=round(sum(s.get("fouls", 0) for s in all_stats) / n, 1),
+            avg_blocked_shots=round(sum(s.get("blocked_shots", 0) for s in all_stats) / n, 1),
+            avg_gk_saves=round(sum(s.get("gk_saves", 0) for s in all_stats) / n, 1),
+            avg_pass_accuracy=round(sum(s.get("pass_accuracy", 0) for s in all_stats) / n, 1),
             matches_with_stats=n,
         )
 

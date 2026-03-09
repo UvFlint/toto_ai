@@ -15,6 +15,8 @@ CLI tool that analyzes Winner 16 football betting forms from winner.co.il. Multi
 - Mark form submitted: `uv run toto --mark-submitted <form_number>`
 - Backtest against past results: `uv run toto --test`
 - Download historical match data: `uv run toto --download-data` (add `--force-download` to re-download)
+- Download Israeli data only: `uv run toto --download-israel`
+- Scrape historical odds from OddsPortal: `uv run toto --scrape-odds`
 - Train ML models: `uv run toto --train-model`
 - Sync deps: `uv sync`
 - Lint: `uv run ruff check src/`
@@ -51,6 +53,8 @@ src/toto_ai/
     one_scraper.py # one.co.il Israeli sports news supplement
   data_collector/  # Historical match data
     football_data_downloader.py  # Async downloader for football-data.co.uk CSVs
+    api_football_downloader.py   # Israeli league data from API-Football (fixtures, stats, odds)
+    oddsportal_scraper.py        # Selenium scraper for OddsPortal historical odds
   ml/              # ML prediction models
     feature_engineering.py  # Feature pipeline, rating features, inference builder
     pi_ratings.py    # Pi-Rating team strength (goal-difference model)

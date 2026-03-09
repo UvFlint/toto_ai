@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     # Calibration (post-odds multiplier + review history)
     CALIBRATION_FILE: str = "data/calibration.json"
 
+    # Israeli league data collection (API-Football)
+    API_FOOTBALL_ISRAEL_SEASONS: str = "2019,2020,2021,2022,2023,2024,2025"
+    API_FOOTBALL_ISRAEL_FETCH_STATS: bool = True
+
     # Historical data collection
     FOOTBALL_DATA_DIR: str = "data/football_data"
 

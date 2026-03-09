@@ -35,6 +35,9 @@ class TeamFormStats(BaseModel):
     avg_shots_on_target: float = 0.0
     avg_corners: float = 0.0
     avg_fouls: float = 0.0
+    avg_blocked_shots: float = 0.0
+    avg_gk_saves: float = 0.0
+    avg_pass_accuracy: float = 0.0
     matches_with_stats: int = 0
 
 

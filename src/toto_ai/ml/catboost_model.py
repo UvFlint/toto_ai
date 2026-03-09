@@ -17,13 +17,18 @@ from toto_ai.analyzer.models import FullColumn, MatchPrediction
 from toto_ai.console import console
 from toto_ai.ml.feature_engineering import (
     CAT_FEATURES,
+    LEAGUE_GROUP_CAT_FEATURES,
+    LEAGUE_GROUP_FEATURES,
+    LEAGUE_GROUPS,
     RICH_FEATURES,
     SIMPLE_FEATURES,
     build_inference_features,
     engineer_rich_features,
     engineer_simple_features,
+    league_code_to_group,
     load_extra_league_data,
     load_main_league_data,
+    match_to_league_code,
 )
 from toto_ai.ml.glicko2 import (
     GlickoStore,
@@ -205,8 +210,8 @@ def train_simple_model(
     return model, metrics, pi_store, glicko_store
 
 
-def train_and_save(data_dir: str | Path, model_dir: str | Path) -> None:
-    """Train both models and save to disk."""
+def train_and_save(data_dir: str | Path, model_dir: str | Path) -> dict:
+    """Train both models and save to disk. Returns rich model metrics."""
     model_dir = Path(model_dir)
     model_dir.mkdir(parents=True, exist_ok=True)
 
@@ -242,6 +247,167 @@ def train_and_save(data_dir: str | Path, model_dir: str | Path) -> None:
     console.print(f"[green]Glicko-2 saved → {glicko_path} ({len(merged_glicko)} teams)[/green]")
 
     console.print("\n[bold green]Both models trained successfully![/bold green]")
+    return rich_metrics
+
+
+def train_league_group_models(
+    data_dir: str | Path, model_dir: str | Path, global_rich_accuracy: float = 0.0
+) -> None:
+    """Train country-group CatBoost models from pre-engineered main league data."""
+    import json
+
+    data_dir = Path(data_dir)
+    model_dir = Path(model_dir)
+    groups_dir = model_dir / "league_groups"
+    groups_dir.mkdir(parents=True, exist_ok=True)
+
+    console.print("\n[bold blue]Training League-Group CatBoost Models[/bold blue]")
+    console.print("=" * 50)
+
+    # Load and engineer features once (global pi-ratings/glicko)
+    console.print("[bold]Loading main league data for league-group training...[/bold]")
+    df = load_main_league_data(data_dir)
+    if df.empty:
+        console.print("[yellow]No main league data found, skipping league-group models.[/yellow]")
+        return
+
+    df, _, _ = engineer_rich_features(df)
+    df = df.dropna(subset=["h_roll_gf", "a_roll_gf"])
+    console.print(f"  Engineered {len(df):,} matches total")
+
+    index: dict[str, object] = {
+        "global_rich_accuracy": global_rich_accuracy,
+        "groups": {},
+    }
+
+    for group_name, league_codes in LEAGUE_GROUPS.items():
+        group_df = df[df["league"].isin(league_codes)].copy()
+        if len(group_df) < 100:
+            console.print(
+                f"  [yellow]{group_name}: too few matches ({len(group_df)}), skipping[/yellow]"
+            )
+            continue
+
+        # Convert season to ordinal numeric (0..N)
+        seasons_sorted = sorted(group_df["season"].unique())
+        season_map = {s: i for i, s in enumerate(seasons_sorted)}
+        group_df["season"] = group_df["season"].map(season_map).astype(float)
+
+        # Drop league column (constant within group)
+        if "league" in group_df.columns:
+            group_df = group_df.drop(columns=["league"])
+
+        # Train/val split: last season
+        val_season_idx = max(season_map.values())
+        train_df = group_df[group_df["season"] != val_season_idx]
+        val_df = group_df[group_df["season"] == val_season_idx]
+
+        if len(val_df) < 10:
+            train_df = group_df.sample(frac=0.85, random_state=42)
+            val_df = group_df.drop(train_df.index)
+
+        # Prepare pools (no categorical features for league-group models)
+        available = [f for f in LEAGUE_GROUP_FEATURES if f in group_df.columns]
+        X_train = train_df[available].copy()
+        X_val = val_df[available].copy()
+
+        train_pool = Pool(X_train, label=train_df["target"])
+        val_pool = Pool(X_val, label=val_df["target"])
+
+        # Class weights
+        class_counts = train_df["target"].value_counts()
+        total = len(train_df)
+        class_weights = {c: total / (3 * count) for c, count in class_counts.items()}
+
+        model = CatBoostClassifier(
+            iterations=1000,
+            depth=6,
+            learning_rate=0.05,
+            loss_function="MultiClass",
+            class_weights=list(class_weights.get(i, 1.0) for i in range(3)),
+            early_stopping_rounds=50,
+            verbose=0,
+            random_seed=42,
+            use_best_model=True,
+        )
+
+        model.fit(train_pool, eval_set=val_pool)
+
+        val_preds = model.predict(val_pool)
+        val_true = val_df["target"].values
+        accuracy = float(np.mean(val_preds.flatten().astype(int) == val_true))
+
+        # Save model
+        group_dir = groups_dir / group_name
+        group_dir.mkdir(parents=True, exist_ok=True)
+        model_path = group_dir / "catboost.cbm"
+        model.save_model(str(model_path))
+
+        # Save metadata
+        metadata = {
+            "leagues": league_codes,
+            "train_size": len(train_df),
+            "val_size": len(val_df),
+            "accuracy": accuracy,
+            "max_season_ordinal": int(val_season_idx),
+        }
+        with open(group_dir / "catboost_metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        for code in league_codes:
+            index["groups"][code] = group_name
+
+        beat_global = accuracy > global_rich_accuracy
+        status = "[bold green]BETTER[/bold green]" if beat_global else "[dim]worse[/dim]"
+        console.print(
+            f"  [green]{group_name:12s}[/green] "
+            f"train={len(train_df):>6,} val={len(val_df):>5,} "
+            f"acc={accuracy:.1%} ({status} than global {global_rich_accuracy:.1%})"
+        )
+
+    # Save index (catboost-specific, includes global accuracy for hybrid filtering)
+    with open(groups_dir / "catboost_index.json", "w") as f:
+        json.dump(index, f, indent=2)
+
+    console.print(
+        f"[green]League-group CatBoost models saved ({len(index['groups'])} league codes)[/green]"
+    )
+
+
+# --- League-group model cache ---
+_catboost_group_cache: dict[str, CatBoostClassifier | None] = {}
+
+
+def _load_league_group_catboost(
+    model_dir: str | Path, group_name: str
+) -> CatBoostClassifier | None:
+    """Lazily load a league-group CatBoost model if it beats the global rich model."""
+    import json
+
+    if group_name in _catboost_group_cache:
+        return _catboost_group_cache[group_name]
+
+    model_dir = Path(model_dir)
+    path = model_dir / "league_groups" / group_name / "catboost.cbm"
+    if not path.exists():
+        _catboost_group_cache[group_name] = None
+        return None
+
+    # Check if group model accuracy beats global rich
+    meta_path = model_dir / "league_groups" / group_name / "catboost_metadata.json"
+    index_path = model_dir / "league_groups" / "catboost_index.json"
+    if meta_path.exists() and index_path.exists():
+        meta = json.loads(meta_path.read_text())
+        idx = json.loads(index_path.read_text())
+        global_acc = idx.get("global_rich_accuracy", 0.0)
+        if meta.get("accuracy", 0.0) <= global_acc:
+            _catboost_group_cache[group_name] = None
+            return None
+
+    model = CatBoostClassifier()
+    model.load_model(str(path))
+    _catboost_group_cache[group_name] = model
+    return model
 
 
 def load_models(
@@ -309,6 +475,10 @@ def _extract_form_match_stats(form) -> dict:
         "sot": fs.avg_shots_on_target,
         "corners": fs.avg_corners,
         "fouls": fs.avg_fouls,
+        "possession": fs.avg_possession,
+        "blocked_shots": fs.avg_blocked_shots,
+        "gk_saves": fs.avg_gk_saves,
+        "pass_accuracy": fs.avg_pass_accuracy,
     }
 
 
@@ -375,38 +545,6 @@ def _extract_standing_features(stats: MatchStats | None) -> dict:
     return result
 
 
-def _match_to_league_code(match: Match) -> str:
-    """Try to map a Match to a football-data.co.uk division code."""
-    from toto_ai.data_collector.football_data_downloader import ALL_DIVISIONS
-
-    league_lower = (match.league or "").lower()
-    country_lower = (match.country or "").lower()
-
-    for code, name in ALL_DIVISIONS.items():
-        if name.lower() in league_lower or league_lower in name.lower():
-            return code
-
-    # Country-based fallback for top divisions
-    country_map = {
-        "england": "E0",
-        "germany": "D1",
-        "italy": "I1",
-        "spain": "SP1",
-        "france": "F1",
-        "scotland": "SC0",
-        "netherlands": "N1",
-        "belgium": "B1",
-        "portugal": "P1",
-        "turkey": "T1",
-        "greece": "G1",
-    }
-    for country, code in country_map.items():
-        if country in country_lower or country in league_lower:
-            return code
-
-    return match.country or match.league or "unknown"
-
-
 def predict_match(
     match: Match,
     stats: MatchStats | None,
@@ -422,7 +560,7 @@ def predict_match(
     if rich_model is None and simple_model is None:
         return None
 
-    league_code = _match_to_league_code(match)
+    league_code = match_to_league_code(match.league, match.country)
 
     # Extract features from live stats
     h_odds = d_odds = a_odds = None
@@ -478,6 +616,14 @@ def predict_match(
         away_corners=a_ms.get("corners"),
         home_fouls=h_ms.get("fouls"),
         away_fouls=a_ms.get("fouls"),
+        home_possession=h_ms.get("possession"),
+        away_possession=a_ms.get("possession"),
+        home_blocked_shots=h_ms.get("blocked_shots"),
+        away_blocked_shots=a_ms.get("blocked_shots"),
+        home_gk_saves=h_ms.get("gk_saves"),
+        away_gk_saves=a_ms.get("gk_saves"),
+        home_pass_accuracy=h_ms.get("pass_accuracy"),
+        away_pass_accuracy=a_ms.get("pass_accuracy"),
         home_rest_days=stats.home_rest_days if stats else None,
         away_rest_days=stats.away_rest_days if stats else None,
         home_injury_count=len(stats.home_injuries) if stats else None,
@@ -490,17 +636,31 @@ def predict_match(
         **news_feats,
     )
 
-    # Choose model: rich if the league is in main divisions and rich model exists
+    # Try league-group model first
+    from toto_ai.config import settings
     from toto_ai.data_collector.football_data_downloader import ALL_DIVISIONS
 
-    use_rich = rich_model is not None and league_code in ALL_DIVISIONS
-    if use_rich:
+    group_name = league_code_to_group(league_code)
+    group_model = (
+        _load_league_group_catboost(settings.MODEL_DIR, group_name) if group_name else None
+    )
+
+    if group_model is not None:
+        model = group_model
+        feat_list = LEAGUE_GROUP_FEATURES
+        cat_feats = LEAGUE_GROUP_CAT_FEATURES
+        variant = f"CatBoost ({group_name})"
+        # Convert season to numeric for league-group model
+        features["season"] = 0.0  # ordinal placeholder for unseen season
+    elif rich_model is not None and league_code in ALL_DIVISIONS:
         model = rich_model
         feat_list = RICH_FEATURES
+        cat_feats = CAT_FEATURES
         variant = "CatBoost (rich)"
     elif simple_model is not None:
         model = simple_model
         feat_list = SIMPLE_FEATURES
+        cat_feats = CAT_FEATURES
         variant = "CatBoost (simple)"
     else:
         return None
@@ -509,13 +669,13 @@ def predict_match(
     row = {}
     for f in feat_list:
         val = features.get(f)
-        if f in CAT_FEATURES:
+        if f in cat_feats:
             row[f] = str(val) if val is not None else "unknown"
         else:
             row[f] = float(val) if val is not None else np.nan
     row_df = pd.DataFrame([row])
 
-    cat_idx = [i for i, f in enumerate(feat_list) if f in CAT_FEATURES]
+    cat_idx = [i for i, f in enumerate(feat_list) if f in cat_feats]
     pool = Pool(row_df, cat_features=cat_idx)
 
     proba = model.predict_proba(pool)[0]  # [p_home, p_draw, p_away]

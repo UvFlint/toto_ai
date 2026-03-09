@@ -45,6 +45,9 @@ ALL_DIVISIONS: dict[str, str] = {
     "T1": "Super Lig",
     # Greece
     "G1": "Super League Greece",
+    # Israel
+    "ISR1": "Israeli Premier League",
+    "ISR_CUP": "Israeli State Cup",
 }
 
 EXTRA_LEAGUES_URL = "https://www.football-data.co.uk/new/{code}.csv"

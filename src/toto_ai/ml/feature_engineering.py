@@ -39,6 +39,14 @@ MAIN_COLS = {
     "AY": "away_yellow",
     "HR": "home_red",
     "AR": "away_red",
+    "HPoss": "home_possession",
+    "APoss": "away_possession",
+    "HBS": "home_blocked_shots",
+    "ABS": "away_blocked_shots",
+    "HGS": "home_gk_saves",
+    "AGS": "away_gk_saves",
+    "HPP": "home_pass_accuracy",
+    "APP": "away_pass_accuracy",
     "B365H": "home_odds",
     "B365D": "draw_odds",
     "B365A": "away_odds",
@@ -89,6 +97,123 @@ INFERENCE_ONLY_FEATURES = [
     "news_home_absence_count",
     "news_away_absence_count",
 ]
+
+# Country-based league groups for league-specific models
+LEAGUE_GROUPS: dict[str, list[str]] = {
+    # England — per division (previously grouped as "england")
+    "england_prem": ["E0"],
+    "england_champ": ["E1"],
+    "england_l1": ["E2"],
+    "england_l2": ["E3"],
+    "germany": ["D1", "D2"],
+    "italy": ["I1", "I2"],
+    "spain": ["SP1", "SP2"],
+    "france": ["F1", "F2"],
+    # Scotland — per division (previously grouped as "scotland")
+    "scotland_prem": ["SC0"],
+    "scotland_champ": ["SC1"],
+    "scotland_l1": ["SC2"],
+    "scotland_l2": ["SC3"],
+    "netherlands": ["N1"],
+    "belgium": ["B1"],
+    "portugal": ["P1"],
+    "turkey": ["T1"],
+    "greece": ["G1"],
+    "israel": ["ISR1", "ISR_CUP"],
+}
+
+# Reverse lookup: league code → group name
+_LEAGUE_CODE_TO_GROUP: dict[str, str] = {
+    code: group for group, codes in LEAGUE_GROUPS.items() for code in codes
+}
+
+
+def league_code_to_group(code: str) -> str | None:
+    """Map a football-data.co.uk division code to its country group name."""
+    return _LEAGUE_CODE_TO_GROUP.get(code)
+
+
+# Hebrew league/country → division code (winner.co.il uses Hebrew names)
+_HEBREW_LEAGUE_MAP: dict[str, str] = {
+    "פרמיירליג": "E0",
+    "פרמייר ליג": "E0",
+    "לה ליגה": "SP1",
+    "בונדסליגה": "D1",
+    "סריה א": "I1",
+    "סרייה א": "I1",
+    "ליג 1": "F1",
+    "ליגת העל": "ISR1",
+    "ליגת על": "ISR1",
+    "גביע המדינה": "ISR_CUP",
+    "גביע ישראל": "ISR_CUP",
+    "ליגה סקוטית": "SC0",
+    "ארדיוויזיה": "N1",
+    "ליגה פורטוגזית": "P1",
+    "ספרדית ראשונה": "SP1",
+    "איטלקית ראשונה": "I1",
+    "גרמנית ראשונה": "D1",
+    "צרפתית ראשונה": "F1",
+}
+
+_HEBREW_COUNTRY_MAP: dict[str, str] = {
+    "אנגליה": "E0",
+    "גרמניה": "D1",
+    "איטליה": "I1",
+    "ספרד": "SP1",
+    "צרפת": "F1",
+    "סקוטלנד": "SC0",
+    "הולנד": "N1",
+    "בלגיה": "B1",
+    "פורטוגל": "P1",
+    "טורקיה": "T1",
+    "יוון": "G1",
+    "ישראל": "ISR1",
+}
+
+
+def match_to_league_code(league: str | None, country: str | None) -> str:
+    """Map a match's league/country names to a football-data.co.uk division code."""
+    from toto_ai.data_collector.football_data_downloader import ALL_DIVISIONS
+
+    league_str = (league or "").strip()
+    country_str = (country or "").strip()
+
+    # Hebrew league name (exact match)
+    if league_str in _HEBREW_LEAGUE_MAP:
+        return _HEBREW_LEAGUE_MAP[league_str]
+
+    # Hebrew country name (exact match, top division fallback)
+    if country_str in _HEBREW_COUNTRY_MAP:
+        return _HEBREW_COUNTRY_MAP[country_str]
+
+    # English league name match
+    league_lower = league_str.lower()
+    country_lower = country_str.lower()
+    for code, name in ALL_DIVISIONS.items():
+        if name.lower() in league_lower or league_lower in name.lower():
+            return code
+
+    # English country-based fallback for top divisions
+    english_country_map = {
+        "england": "E0",
+        "germany": "D1",
+        "italy": "I1",
+        "spain": "SP1",
+        "france": "F1",
+        "scotland": "SC0",
+        "netherlands": "N1",
+        "belgium": "B1",
+        "portugal": "P1",
+        "turkey": "T1",
+        "greece": "G1",
+        "israel": "ISR1",
+    }
+    for cname, code in english_country_map.items():
+        if cname in country_lower or cname in league_lower:
+            return code
+
+    return country_str or league_str or "unknown"
+
 
 # Target encoding: FTR/Res values → numeric classes
 RESULT_MAP = {"H": 0, "D": 1, "A": 2}
@@ -317,6 +442,14 @@ def engineer_rich_features(df: pd.DataFrame) -> tuple[pd.DataFrame, RatingStore,
         "away_red",
         "ht_goal_ratio_home",
         "ht_goal_ratio_away",
+        "home_possession",
+        "away_possession",
+        "home_blocked_shots",
+        "away_blocked_shots",
+        "home_gk_saves",
+        "away_gk_saves",
+        "home_pass_accuracy",
+        "away_pass_accuracy",
     ]
     df = _add_rolling_features(df, cols_to_roll=rich_stats_cols)
 
@@ -409,6 +542,23 @@ RICH_FEATURES = [
     # Rolling half-time goal ratio
     "h_roll_ht_goal_ratio_home",
     "a_roll_ht_goal_ratio_away",
+    # Rolling advanced stats (possession, blocked shots, GK saves, pass accuracy)
+    "h_roll_home_possession",
+    "h_roll_away_possession",
+    "a_roll_home_possession",
+    "a_roll_away_possession",
+    "h_roll_home_blocked_shots",
+    "h_roll_away_blocked_shots",
+    "a_roll_home_blocked_shots",
+    "a_roll_away_blocked_shots",
+    "h_roll_home_gk_saves",
+    "h_roll_away_gk_saves",
+    "a_roll_home_gk_saves",
+    "a_roll_away_gk_saves",
+    "h_roll_home_pass_accuracy",
+    "h_roll_away_pass_accuracy",
+    "a_roll_home_pass_accuracy",
+    "a_roll_away_pass_accuracy",
     # Pi-ratings
     *PI_FEATURE_COLS,
     # Glicko-2
@@ -442,6 +592,11 @@ SIMPLE_FEATURES = [
 
 CAT_FEATURES = ["league", "season"]
 
+# League-group models: same as RICH but without "league" (constant within group)
+# and "season" is converted to numeric ordinal, so no categorical features.
+LEAGUE_GROUP_FEATURES = [f for f in RICH_FEATURES if f != "league"]
+LEAGUE_GROUP_CAT_FEATURES: list[str] = []  # season becomes numeric ordinal
+
 
 def build_inference_features(
     match_league: str,
@@ -468,6 +623,14 @@ def build_inference_features(
     away_fouls: float | None = None,
     home_yellow: float | None = None,
     away_yellow: float | None = None,
+    home_possession: float | None = None,
+    away_possession: float | None = None,
+    home_blocked_shots: float | None = None,
+    away_blocked_shots: float | None = None,
+    home_gk_saves: float | None = None,
+    away_gk_saves: float | None = None,
+    home_pass_accuracy: float | None = None,
+    away_pass_accuracy: float | None = None,
     # Pi-rating features
     pi_home_ha: float | None = None,
     pi_home_hd: float | None = None,
@@ -562,16 +725,16 @@ def build_inference_features(
         "h_roll_away_fouls": away_fouls,
         "h_roll_home_yellow": home_yellow,
         "h_roll_away_yellow": away_yellow,
-        "a_roll_home_shots": None,
-        "a_roll_away_shots": None,
-        "a_roll_home_shots_on_target": None,
-        "a_roll_away_shots_on_target": None,
-        "a_roll_home_corners": None,
-        "a_roll_away_corners": None,
-        "a_roll_home_fouls": None,
-        "a_roll_away_fouls": None,
-        "a_roll_home_yellow": None,
-        "a_roll_away_yellow": None,
+        "a_roll_home_shots": away_shots,
+        "a_roll_away_shots": away_shots,
+        "a_roll_home_shots_on_target": away_sot,
+        "a_roll_away_shots_on_target": away_sot,
+        "a_roll_home_corners": away_corners,
+        "a_roll_away_corners": away_corners,
+        "a_roll_home_fouls": away_fouls,
+        "a_roll_away_fouls": away_fouls,
+        "a_roll_home_yellow": away_yellow,
+        "a_roll_away_yellow": away_yellow,
         "league": match_league,
         "season": "current",
         # Pi-ratings
@@ -595,10 +758,27 @@ def build_inference_features(
         # Red cards & half-time ratio
         "h_roll_home_red": home_red,
         "h_roll_away_red": away_red,
-        "a_roll_home_red": None,
-        "a_roll_away_red": None,
+        "a_roll_home_red": away_red,
+        "a_roll_away_red": away_red,
         "h_roll_ht_goal_ratio_home": home_ht_goal_ratio,
         "a_roll_ht_goal_ratio_away": away_ht_goal_ratio,
+        # Advanced stats (possession, blocked shots, GK saves, pass accuracy)
+        "h_roll_home_possession": home_possession,
+        "h_roll_away_possession": away_possession,
+        "a_roll_home_possession": away_possession,
+        "a_roll_away_possession": away_possession,
+        "h_roll_home_blocked_shots": home_blocked_shots,
+        "h_roll_away_blocked_shots": away_blocked_shots,
+        "a_roll_home_blocked_shots": away_blocked_shots,
+        "a_roll_away_blocked_shots": away_blocked_shots,
+        "h_roll_home_gk_saves": home_gk_saves,
+        "h_roll_away_gk_saves": away_gk_saves,
+        "a_roll_home_gk_saves": away_gk_saves,
+        "a_roll_away_gk_saves": away_gk_saves,
+        "h_roll_home_pass_accuracy": home_pass_accuracy,
+        "h_roll_away_pass_accuracy": away_pass_accuracy,
+        "a_roll_home_pass_accuracy": away_pass_accuracy,
+        "a_roll_away_pass_accuracy": away_pass_accuracy,
         # Inference-only
         "home_rest_days": home_rest_days,
         "away_rest_days": away_rest_days,
