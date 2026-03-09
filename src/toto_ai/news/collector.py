@@ -13,7 +13,7 @@ from toto_ai.stats.models import MatchStats
 _ISRAELI_LEAGUE_NAMES = {"ליגת העל", "ליגה לאומית", "גביע המדינה", "גביע הטוטו"}
 
 _NEWS_AGENT = Agent(
-    "google-gla:gemini-2.5-flash",
+    "google-gla:gemini-3-flash-preview",
     builtin_tools=[WebSearchTool()],
     system_prompt=(
         "You are a football news researcher. "

@@ -34,7 +34,7 @@ MODELS_STANDARD = [
 ]
 
 MODELS_PREMIUM = [
-    ("openai:gpt-5.2", "GPT-5.2 (gpt-5.2)"),
+    ("openai:gpt-5.4", "GPT-5.4 (gpt-5.4)"),
     ("google-gla:gemini-3.1-pro-preview", "Gemini Pro (gemini-3.1-pro-preview)"),
     ("anthropic:claude-opus-4-6", "Claude Opus (claude-opus-4-6)"),
     (f"deepseek:{_DEEPSEEK_MODEL_ID}", f"DeepSeek ({_DEEPSEEK_MODEL_ID})"),
@@ -43,7 +43,7 @@ MODELS_PREMIUM = [
 # Per-model extra settings passed to the agent call
 _MODEL_SETTINGS: dict[str, dict] = {
     "claude-opus-4-6": {"thinking": {"type": "enabled", "budget_tokens": 16000}},
-    "gpt-5.2": {"reasoning_effort": "high"},
+    "gpt-5.4": {"reasoning_effort": "high"},
     "gemini-3.1-pro-preview": {"google_thinking_config": {"thinking_budget": -1}},
 }
 
