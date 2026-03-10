@@ -36,6 +36,19 @@ def _union_for_match(report: FullReport, match_number: int) -> tuple[str, str]:
     return union_str, color
 
 
+def _short_model_name(model_name: str) -> str:
+    """Extract a short display name from the full model name.
+
+    e.g. 'GPT-4o (gpt-4o)' -> 'GPT-4o', 'Claude Sonnet (claude-sonnet-4-6)' -> 'Claude'.
+    """
+    # Take the part before the parenthesis
+    short = model_name.split("(")[0].strip()
+    # Further shorten by taking first word if still long
+    if len(short) > 10:
+        short = short.split()[0]
+    return short
+
+
 def display_report(report: FullReport) -> None:
     """Display the full analysis report in the console."""
     if not report.columns:
@@ -44,8 +57,13 @@ def display_report(report: FullReport) -> None:
 
     # Header
     console.print()
-    console.rule("[bold blue]Winner 16 AI Analysis Report[/bold blue]")
+    title = "Winner 16 AI Analysis Report"
+    if report.stabilize_runs:
+        title += f" (Stabilized over {report.stabilize_runs} runs)"
+    console.rule(f"[bold blue]{title}[/bold blue]")
     console.print()
+
+    is_stabilized = bool(report.stabilize_runs and report.run_columns)
 
     # Summary table
     table = Table(
@@ -63,15 +81,42 @@ def display_report(report: FullReport) -> None:
     if report.external_column:
         table.add_column(report.external_column.model_name, justify="center", width=14, style="dim")
 
-    for col in report.columns:
-        table.add_column(col.model_name, justify="center", width=14)
+    if is_stabilized:
+        # Add per-run + stabilized columns grouped by model
+        model_names = [col.model_name for col in report.columns]
+        for model_name in model_names:
+            short = _short_model_name(model_name)
+            for run_num in range(1, report.stabilize_runs + 1):
+                table.add_column(f"{short} [R{run_num}]", justify="center", width=8, style="dim")
+            table.add_column(f"{short} [S]", justify="center", width=10, style="bold")
+    else:
+        for col in report.columns:
+            table.add_column(col.model_name, justify="center", width=14)
 
     table.add_column("Consensus", justify="center", width=10, style="bold")
     table.add_column("Union", justify="center", width=9)
+    table.add_column("Draw%", justify="center", width=7)
+
+    draw_prob_map = {d.match_number: d.draw_prob for d in report.draw_probs}
 
     # Get match count from first available column
     first_col = report.columns[0] if report.columns else report.external_column
     match_count = len(first_col.predictions) if first_col else 0
+
+    # Build lookup for run columns: (run_index, model_name, match_number) -> prediction
+    run_pred_map: dict[tuple[int, str, int], str] = {}
+    if is_stabilized:
+        for run_idx, run_cols in enumerate(report.run_columns):
+            for col in run_cols:
+                for pred in col.predictions:
+                    run_pred_map[(run_idx, col.model_name, pred.match_number)] = pred.prediction
+
+    # Build lookup for stabilization info: (model_name, match_number) -> StabilizedPrediction
+    stab_map: dict[tuple[str, int], object] = {}
+    if is_stabilized:
+        for model_name, stab_list in report.stabilized_predictions.items():
+            for sp in stab_list:
+                stab_map[(model_name, sp.match_number)] = sp
 
     for i in range(1, match_count + 1):
         row: list[str | Text] = [str(i)]
@@ -100,16 +145,51 @@ def display_report(report: FullReport) -> None:
             if not ext_found:
                 row.append(Text("-", style="dim"))
 
-        # Each model's prediction
-        for col in report.columns:
-            pred_found = False
-            for pred in col.predictions:
-                if pred.match_number == i:
-                    row.append(_prediction_display(pred.prediction, pred.confidence))
-                    pred_found = True
-                    break
-            if not pred_found:
-                row.append(Text("-", style="dim"))
+        if is_stabilized:
+            # Per-run predictions + stabilized column per model
+            for col in report.columns:
+                for run_idx in range(report.stabilize_runs):
+                    pred_str = run_pred_map.get((run_idx, col.model_name, i))
+                    if pred_str:
+                        row.append(Text(pred_str, style="dim"))
+                    else:
+                        row.append(Text("-", style="dim"))
+
+                # Stabilized prediction
+                sp = stab_map.get((col.model_name, i))
+                if sp:
+                    if sp.is_fallback:
+                        row.append(
+                            Text(
+                                f"{sp.stable_prediction}* [{sp.stability}]",
+                                style="bold magenta",
+                            )
+                        )
+                    else:
+                        row.append(
+                            Text(f"{sp.stable_prediction} [{sp.stability}]", style="bold green")
+                        )
+                else:
+                    # Fallback: use the stabilized column prediction directly
+                    pred_found = False
+                    for pred in col.predictions:
+                        if pred.match_number == i:
+                            row.append(_prediction_display(pred.prediction, pred.confidence))
+                            pred_found = True
+                            break
+                    if not pred_found:
+                        row.append(Text("-", style="dim"))
+        else:
+            # Standard mode: each model's prediction
+            for col in report.columns:
+                pred_found = False
+                for pred in col.predictions:
+                    if pred.match_number == i:
+                        row.append(_prediction_display(pred.prediction, pred.confidence))
+                        pred_found = True
+                        break
+                if not pred_found:
+                    row.append(Text("-", style="dim"))
 
         # Consensus
         total_models = len(report.columns)
@@ -130,10 +210,32 @@ def display_report(report: FullReport) -> None:
         union_str, union_color = _union_for_match(report, i)
         row.append(Text(union_str, style=f"bold {union_color}"))
 
+        # Draw probability
+        dp = draw_prob_map.get(i)
+        if dp is not None:
+            color = "red" if dp >= 0.6 else ("yellow" if dp >= 0.4 else "dim")
+            row.append(Text(f"{dp:.0%}", style=color))
+        else:
+            row.append(Text("-", style="dim"))
+
         table.add_row(*row)
 
     console.print(table)
     console.print()
+
+    # Stabilization legend
+    if is_stabilized:
+        fallback_count = sum(
+            1
+            for stab_list in report.stabilized_predictions.values()
+            for sp in stab_list
+            if sp.is_fallback
+        )
+        console.print(
+            f"[dim]* = fallback to statistical model ({fallback_count} predictions). "
+            f"[S] = stabilized across {report.stabilize_runs} runs.[/dim]"
+        )
+        console.print()
 
     # Banker picks
     if report.banker_picks:
@@ -154,6 +256,31 @@ def display_report(report: FullReport) -> None:
                 f"[bold red]Upset Alerts (models disagree): {upsets}[/bold red]",
                 title="Caution",
                 border_style="red",
+            )
+        )
+
+    # News impact alerts (post-odds items only)
+    post_odds_snapshots = [s for s in report.news_snapshots if s.post_odds_item_count > 0]
+    if post_odds_snapshots:
+        news_lines: list[str] = []
+        for snap in sorted(post_odds_snapshots, key=lambda s: s.match_number):
+            direction = (
+                "Home" if snap.net_impact > 0 else "Away" if snap.net_impact < 0 else "Neutral"
+            )
+            impact_str = f"{snap.net_impact:+.2f} → {direction}"
+            parts = [
+                f"[bold]#{snap.match_number}[/bold] {snap.home_team} vs {snap.away_team}",
+                f"Impact: {impact_str}",
+                f"{snap.post_odds_item_count} post-odds item{'s' if snap.post_odds_item_count != 1 else ''} (×{snap.multiplier_used})",
+            ]
+            if snap.has_x_factor:
+                parts.append("[bold red]X-FACTOR[/bold red]")
+            news_lines.append("  ".join(parts))
+        console.print(
+            Panel(
+                "\n".join(news_lines),
+                title="News Impact (post-published form)",
+                border_style="magenta",
             )
         )
 
@@ -415,6 +542,7 @@ def _display_cost_summary(report: FullReport) -> None:
     cost_table.add_column("Output tokens", justify="right")
     cost_table.add_column("Cost (USD)", justify="right")
 
+    runs_suffix = f" (× {report.stabilize_runs} runs)" if report.stabilize_runs else ""
     all_costs = [(col.model_name, col.usage) for col in report.columns]
     has_cost = any(u.cost_usd > 0 for _, u in all_costs)
 
@@ -426,7 +554,7 @@ def _display_cost_summary(report: FullReport) -> None:
         total_cost += u.cost_usd
         cost_str = f"${u.cost_usd:.4f}" if has_cost else "-"
         cost_table.add_row(
-            label,
+            f"{label}{runs_suffix}",
             f"{u.input_tokens:,}",
             f"{u.output_tokens:,}",
             cost_str,

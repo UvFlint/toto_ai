@@ -17,12 +17,17 @@ from toto_ai.analyzer.models import FullColumn, MatchPrediction
 from toto_ai.console import console
 from toto_ai.ml.feature_engineering import (
     CAT_FEATURES,
+    DRAW_CAT_FEATURES,
+    DRAW_FEATURES,
+    DRAW_LEAGUE_GROUP_CAT_FEATURES,
+    DRAW_LEAGUE_GROUP_FEATURES,
     LEAGUE_GROUP_CAT_FEATURES,
     LEAGUE_GROUP_FEATURES,
     LEAGUE_GROUPS,
     RICH_FEATURES,
     SIMPLE_FEATURES,
     build_inference_features,
+    engineer_draw_features,
     engineer_rich_features,
     engineer_simple_features,
     league_code_to_group,
@@ -42,8 +47,10 @@ from toto_ai.stats.models import MatchStats
 
 RICH_MODEL_FILE = "catboost_rich.cbm"
 SIMPLE_MODEL_FILE = "catboost_simple.cbm"
+DRAW_MODEL_FILE = "catboost_draw.cbm"
 PI_RATINGS_FILE = "pi_ratings.pkl"
 GLICKO_RATINGS_FILE = "glicko2_ratings.pkl"
+DRAW_LEAGUE_GROUPS_DIR = "draw_league_groups"
 
 # Class labels for CatBoost output
 CLASS_NAMES = ["H", "D", "A"]  # 0=Home, 1=Draw, 2=Away
@@ -775,3 +782,375 @@ def enrich_stats_with_catboost(
         if result is not None:
             probs, _ = result
             s.catboost_probs = probs
+
+
+# --- Draw Detection Binary Classifier ---
+
+
+def train_draw_model(
+    data_dir: str | Path,
+) -> tuple[CatBoostClassifier, dict, RatingStore, GlickoStore]:
+    """Train binary draw detector on all available data (main + extra leagues)."""
+    console.print("[bold]Loading all league data for draw classifier...[/bold]")
+    main_df = load_main_league_data(data_dir)
+    extra_df = load_extra_league_data(data_dir)
+
+    frames = [df for df in [main_df, extra_df] if not df.empty]
+    if not frames:
+        raise RuntimeError("No data found. Run --download-data first.")
+
+    common_cols = [
+        "league", "season", "home_team", "away_team",
+        "home_goals", "away_goals", "result",
+        "home_odds", "draw_odds", "away_odds", "date",
+    ]
+    normalized = []
+    for df in frames:
+        available = [c for c in common_cols if c in df.columns]
+        normalized.append(df[available])
+
+    df = pd.concat(normalized, ignore_index=True)
+    console.print(f"  Loaded {len(df):,} total matches")
+
+    df, pi_store, glicko_store = engineer_draw_features(df)
+    df = df.dropna(subset=["h_roll_gf", "a_roll_gf"])
+    console.print(f"  After feature engineering: {len(df):,} matches")
+
+    draw_count = int((df["target"] == 1).sum())
+    draw_pct = 100.0 * draw_count / len(df)
+    console.print(f"  Draw rate: {draw_pct:.1f}% ({draw_count:,} draws)")
+
+    seasons = sorted(df["season"].unique())
+    val_season = seasons[-1] if len(seasons) > 1 else None
+    if val_season:
+        train_df = df[df["season"] != val_season]
+        val_df = df[df["season"] == val_season]
+    else:
+        train_df = df.sample(frac=0.8, random_state=42)
+        val_df = df.drop(train_df.index)
+
+    console.print(f"  Train: {len(train_df):,} | Val: {len(val_df):,}")
+
+    class_counts = train_df["target"].value_counts()
+    total = len(train_df)
+    class_weights = {c: total / (2 * count) for c, count in class_counts.items()}
+
+    train_pool, _ = _prepare_pool(train_df, DRAW_FEATURES, DRAW_CAT_FEATURES)
+    val_pool, _ = _prepare_pool(val_df, DRAW_FEATURES, DRAW_CAT_FEATURES)
+
+    model = CatBoostClassifier(
+        iterations=1000,
+        depth=6,
+        learning_rate=0.05,
+        loss_function="Logloss",
+        class_weights=list(class_weights.get(i, 1.0) for i in range(2)),
+        early_stopping_rounds=50,
+        verbose=100,
+        random_seed=42,
+        use_best_model=True,
+    )
+    model.fit(train_pool, eval_set=val_pool)
+
+    val_preds = model.predict(val_pool)
+    val_true = val_df["target"].values
+    accuracy = float(np.mean(val_preds.flatten().astype(int) == val_true))
+
+    # Draw recall: fraction of actual draws correctly predicted as draw
+    draw_mask = val_true == 1
+    draw_recall = float(np.mean(val_preds.flatten().astype(int)[draw_mask] == 1)) if draw_mask.any() else 0.0
+
+    metrics = {
+        "accuracy": accuracy,
+        "draw_recall": draw_recall,
+        "train_size": len(train_df),
+        "val_size": len(val_df),
+        "val_draw_rate": draw_pct,
+    }
+    return model, metrics, pi_store, glicko_store
+
+
+def train_draw_league_group_models(
+    data_dir: str | Path, model_dir: str | Path, global_draw_accuracy: float = 0.0
+) -> None:
+    """Train per-country draw classifiers; only save if they beat the global model."""
+    import json
+
+    data_dir = Path(data_dir)
+    model_dir = Path(model_dir)
+    groups_dir = model_dir / DRAW_LEAGUE_GROUPS_DIR
+    groups_dir.mkdir(parents=True, exist_ok=True)
+
+    console.print("\n[bold blue]Training League-Group Draw Classifiers[/bold blue]")
+    console.print("=" * 50)
+
+    df = load_main_league_data(data_dir)
+    if df.empty:
+        console.print("[yellow]No main league data, skipping draw league-group models.[/yellow]")
+        return
+
+    df, _, _ = engineer_draw_features(df)
+    df = df.dropna(subset=["h_roll_gf", "a_roll_gf"])
+
+    index: dict[str, object] = {"global_draw_recall": global_draw_accuracy, "groups": {}}
+
+    for group_name, league_codes in LEAGUE_GROUPS.items():
+        group_df = df[df["league"].isin(league_codes)].copy()
+        if len(group_df) < 100:
+            console.print(f"  [yellow]{group_name}: too few matches ({len(group_df)}), skipping[/yellow]")
+            continue
+
+        seasons_sorted = sorted(group_df["season"].unique())
+        season_map = {s: i for i, s in enumerate(seasons_sorted)}
+        group_df["season"] = group_df["season"].map(season_map).astype(float)
+        val_season_idx = season_map.get(seasons_sorted[-1], 0)
+        if "league" in group_df.columns:
+            group_df = group_df.drop(columns=["league"])
+
+        if val_season_idx > 0:
+            train_df = group_df[group_df["season"] != float(val_season_idx)]
+            val_df = group_df[group_df["season"] == float(val_season_idx)]
+        else:
+            train_df = group_df.sample(frac=0.8, random_state=42)
+            val_df = group_df.drop(train_df.index)
+
+        if len(train_df) < 50 or len(val_df) < 20:
+            continue
+
+        class_counts = train_df["target"].value_counts()
+        total = len(train_df)
+        class_weights = {c: total / (2 * count) for c, count in class_counts.items()}
+
+        train_pool, _ = _prepare_pool(train_df, DRAW_LEAGUE_GROUP_FEATURES, DRAW_LEAGUE_GROUP_CAT_FEATURES)
+        val_pool, _ = _prepare_pool(val_df, DRAW_LEAGUE_GROUP_FEATURES, DRAW_LEAGUE_GROUP_CAT_FEATURES)
+
+        model = CatBoostClassifier(
+            iterations=500,
+            depth=5,
+            learning_rate=0.05,
+            loss_function="Logloss",
+            class_weights=list(class_weights.get(i, 1.0) for i in range(2)),
+            early_stopping_rounds=30,
+            verbose=0,
+            random_seed=42,
+            use_best_model=True,
+        )
+        model.fit(train_pool, eval_set=val_pool)
+
+        val_preds = model.predict(val_pool)
+        val_true = val_df["target"].values
+        val_preds_flat = val_preds.flatten().astype(int)
+        accuracy = float(np.mean(val_preds_flat == val_true))
+        draw_mask = val_true == 1
+        draw_recall = float(np.mean(val_preds_flat[draw_mask] == 1)) if draw_mask.any() else 0.0
+
+        group_dir = groups_dir / group_name
+        group_dir.mkdir(exist_ok=True)
+        model.save_model(str(group_dir / "catboost.cbm"))
+
+        metadata = {
+            "leagues": league_codes,
+            "train_size": len(train_df),
+            "val_size": len(val_df),
+            "accuracy": accuracy,
+            "draw_recall": draw_recall,
+            "max_season_ordinal": int(val_season_idx),
+        }
+        with open(group_dir / "catboost_metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        for code in league_codes:
+            index["groups"][code] = group_name
+
+        beat_global = draw_recall > global_draw_accuracy
+        status = "[bold green]BETTER[/bold green]" if beat_global else "[dim]worse[/dim]"
+        console.print(
+            f"  [green]{group_name:12s}[/green] "
+            f"train={len(train_df):>6,} val={len(val_df):>5,} "
+            f"acc={accuracy:.1%} recall={draw_recall:.1%} ({status} than global recall {global_draw_accuracy:.1%})"
+        )
+
+    with open(groups_dir / "catboost_index.json", "w") as f:
+        json.dump(index, f, indent=2)
+    console.print(f"[green]Draw league-group models saved ({len(index['groups'])} league codes)[/green]")
+
+
+# --- Draw model cache ---
+_draw_group_cache: dict[str, CatBoostClassifier | None] = {}
+
+
+def _load_draw_league_group_model(
+    model_dir: str | Path, group_name: str
+) -> CatBoostClassifier | None:
+    """Lazily load a draw league-group model if it beats the global draw model."""
+    import json
+
+    if group_name in _draw_group_cache:
+        return _draw_group_cache[group_name]
+
+    model_dir = Path(model_dir)
+    path = model_dir / DRAW_LEAGUE_GROUPS_DIR / group_name / "catboost.cbm"
+    if not path.exists():
+        _draw_group_cache[group_name] = None
+        return None
+
+    meta_path = model_dir / DRAW_LEAGUE_GROUPS_DIR / group_name / "catboost_metadata.json"
+    index_path = model_dir / DRAW_LEAGUE_GROUPS_DIR / "catboost_index.json"
+    if meta_path.exists() and index_path.exists():
+        meta = json.loads(meta_path.read_text())
+        idx = json.loads(index_path.read_text())
+        global_acc = idx.get("global_draw_recall", 0.0)
+        if meta.get("draw_recall", 0.0) <= global_acc:
+            _draw_group_cache[group_name] = None
+            return None
+
+    model = CatBoostClassifier()
+    model.load_model(str(path))
+    _draw_group_cache[group_name] = model
+    return model
+
+
+def load_draw_model(model_dir: str | Path) -> CatBoostClassifier | None:
+    """Load the global draw classifier from disk."""
+    path = Path(model_dir) / DRAW_MODEL_FILE
+    if not path.exists():
+        return None
+    model = CatBoostClassifier()
+    model.load_model(str(path))
+    return model
+
+
+def predict_draw_probability(
+    match: Match,
+    stats: MatchStats | None,
+    draw_model: CatBoostClassifier | None,
+    pi_store: RatingStore | None = None,
+    glicko_store: GlickoStore | None = None,
+) -> float | None:
+    """Return P(draw) in [0, 1] using the draw detection classifier, or None if unavailable."""
+    from toto_ai.config import settings
+
+    league_code = match_to_league_code(match.league, match.country)
+
+    # Try per-league group model first
+    group_name = league_code_to_group(league_code)
+    group_model = (
+        _load_draw_league_group_model(settings.MODEL_DIR, group_name) if group_name else None
+    )
+
+    if group_model is not None:
+        model = group_model
+        feat_list = DRAW_LEAGUE_GROUP_FEATURES
+        cat_feats = DRAW_LEAGUE_GROUP_CAT_FEATURES
+        use_ordinal_season = True
+    elif draw_model is not None:
+        model = draw_model
+        feat_list = DRAW_FEATURES
+        cat_feats = DRAW_CAT_FEATURES
+        use_ordinal_season = False
+    else:
+        return None
+
+    # Extract features (reuse existing helpers)
+    h_odds = d_odds = a_odds = None
+    if stats and stats.odds:
+        h_odds = stats.odds.home_odds or None
+        d_odds = stats.odds.draw_odds or None
+        a_odds = stats.odds.away_odds or None
+
+    h_gf, h_ga, h_pts = _extract_form_stats(stats.home_form if stats else None)
+    a_gf, a_ga, a_pts = _extract_form_stats(stats.away_form if stats else None)
+    h_gpg, h_ppg = _extract_standing_stats(stats.home_standing if stats else None)
+    a_gpg, a_ppg = _extract_standing_stats(stats.away_standing if stats else None)
+
+    pi_feats = compute_pi_features(pi_store, match.home_team, match.away_team) if pi_store else {}
+    glicko_feats = (
+        compute_glicko2_features(glicko_store, match.home_team, match.away_team)
+        if glicko_store
+        else {}
+    )
+    h2h_feats = _extract_h2h_features(stats)
+    xg_feats = _extract_xg_features(stats)
+    standing_feats = _extract_standing_features(stats)
+
+    # Compute implied probabilities inline
+    implied_draw = None
+    if h_odds and d_odds and a_odds:
+        inv_total = 1.0 / h_odds + 1.0 / d_odds + 1.0 / a_odds
+        implied_draw = (1.0 / d_odds) / inv_total
+        implied_home = (1.0 / h_odds) / inv_total
+        implied_away = (1.0 / a_odds) / inv_total
+    else:
+        implied_home = implied_away = None
+
+    raw_features: dict = {
+        "implied_draw": implied_draw,
+        "implied_home": implied_home,
+        "implied_away": implied_away,
+        "draw_odds": d_odds,
+        "home_odds": h_odds,
+        "away_odds": a_odds,
+        "h_roll_gf": h_gf,
+        "h_roll_ga": h_ga,
+        "h_roll_pts": h_pts,
+        "a_roll_gf": a_gf,
+        "a_roll_ga": a_ga,
+        "a_roll_pts": a_pts,
+        "h_roll_draw_rate": None,  # not available at inference time
+        "a_roll_draw_rate": None,
+        "h_season_gpg": h_gpg,
+        "h_season_ppg": h_ppg,
+        "a_season_gpg": a_gpg,
+        "a_season_ppg": a_ppg,
+        "h_season_draw_rate": None,
+        "a_season_draw_rate": None,
+        "league": league_code,
+        "season": 0.0 if use_ordinal_season else "current",
+        "h2h_draw_rate": h2h_feats.get("h2h_draw_rate"),
+        "h2h_total_matches": h2h_feats.get("h2h_total_matches"),
+        "home_rest_days": stats.home_rest_days if stats else None,
+        "away_rest_days": stats.away_rest_days if stats else None,
+        "xg_diff": xg_feats.get("xg_diff"),
+        "home_injury_count": float(len(stats.home_injuries)) if stats else None,
+        "away_injury_count": float(len(stats.away_injuries)) if stats else None,
+        "position_diff": standing_feats.get("position_diff"),
+        **pi_feats,
+        **glicko_feats,
+    }
+
+    row = {}
+    for f in feat_list:
+        val = raw_features.get(f)
+        if f in cat_feats:
+            row[f] = str(val) if val is not None else "unknown"
+        else:
+            row[f] = float(val) if val is not None else np.nan
+
+    row_df = pd.DataFrame([row])
+    cat_idx = [i for i, f in enumerate(feat_list) if f in cat_feats]
+    pool = Pool(row_df, cat_features=cat_idx)
+
+    proba = model.predict_proba(pool)[0]  # [p_no_draw, p_draw]
+    return round(float(proba[1]), 4)
+
+
+def enrich_stats_with_draw_probability(
+    matches: list[Match],
+    stats: list[MatchStats],
+) -> None:
+    """Attach draw probability to each MatchStats using the draw detection classifier."""
+    from toto_ai.config import settings
+
+    draw_model = load_draw_model(settings.MODEL_DIR)
+    _, _, pi_store, glicko_store = load_models(settings.MODEL_DIR)
+
+    if draw_model is None:
+        console.print("[yellow]Draw classifier: no model found. Run --train-model first.[/yellow]")
+        return
+
+    for match in matches:
+        s = next((st for st in stats if st.home_team == match.home_team), None)
+        if s is None:
+            continue
+        prob = predict_draw_probability(match, s, draw_model, pi_store, glicko_store)
+        if prob is not None:
+            s.draw_prob = prob

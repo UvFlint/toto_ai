@@ -495,6 +495,56 @@ def engineer_simple_features(df: pd.DataFrame) -> tuple[pd.DataFrame, RatingStor
     return df, pi_store, glicko_store
 
 
+def engineer_draw_features(df: pd.DataFrame) -> tuple[pd.DataFrame, RatingStore, GlickoStore]:
+    """Feature engineering for draw detection binary classifier.
+
+    Builds on simple features (rolling form, odds, pi/glicko ratings) and adds
+    draw-rate rolling columns. Target: 1 if draw, 0 otherwise.
+    """
+    df = df.copy()
+
+    # Pi-ratings and Glicko-2
+    df, pi_store = compute_pi_ratings(df)
+    df, glicko_store = compute_glicko2_ratings(df)
+
+    df = _add_odds_implied_probs(df)
+    df = _add_rolling_features(df, cols_to_roll=[])
+    df = _add_season_strength(df)
+
+    # Draw-specific rolling features
+    df = df.reset_index(drop=True)
+    df["_is_draw_home"] = (df["result"] == "D").astype(float)
+    df["_is_draw_away"] = (df["result"] == "D").astype(float)
+
+    df["h_roll_draw_rate"] = df.groupby("home_team")["_is_draw_home"].transform(
+        lambda x: x.shift(1).rolling(ROLLING_WINDOW, min_periods=1).mean()
+    )
+    df["a_roll_draw_rate"] = df.groupby("away_team")["_is_draw_away"].transform(
+        lambda x: x.shift(1).rolling(ROLLING_WINDOW, min_periods=1).mean()
+    )
+
+    # Season-level draw rates
+    df["h_season_draw_rate"] = df.groupby(["home_team", "league", "season"])[
+        "_is_draw_home"
+    ].transform(lambda x: x.shift(1).expanding().mean())
+    df["a_season_draw_rate"] = df.groupby(["away_team", "league", "season"])[
+        "_is_draw_away"
+    ].transform(lambda x: x.shift(1).expanding().mean())
+
+    df.drop(columns=["_is_draw_home", "_is_draw_away"], inplace=True, errors="ignore")
+
+    # Inference-only placeholders
+    for col in ["h2h_draw_rate", "h2h_total_matches", "home_rest_days", "away_rest_days",
+                "xg_diff", "home_injury_count", "away_injury_count", "position_diff"]:
+        df[col] = float("nan")
+
+    # Binary target: 1=draw, 0=no draw
+    df["target"] = (df["result"] == "D").astype(int)
+    df = df.dropna(subset=["result"])
+
+    return df, pi_store, glicko_store
+
+
 # --- Feature lists for model training ---
 
 RICH_FEATURES = [
@@ -621,6 +671,56 @@ CAT_FEATURES = ["league", "season"]
 # and "season" is converted to numeric ordinal, so no categorical features.
 LEAGUE_GROUP_FEATURES = [f for f in RICH_FEATURES if f != "league"]
 LEAGUE_GROUP_CAT_FEATURES: list[str] = []  # season becomes numeric ordinal
+
+# Draw detection binary classifier features (0=no draw, 1=draw)
+DRAW_FEATURES = [
+    # Odds-implied (strongest draw signal)
+    "implied_draw",
+    "implied_home",
+    "implied_away",
+    "draw_odds",
+    "home_odds",
+    "away_odds",
+    # Rolling form
+    "h_roll_gf",
+    "h_roll_ga",
+    "h_roll_pts",
+    "a_roll_gf",
+    "a_roll_ga",
+    "a_roll_pts",
+    # Draw-rate rolling (computed in engineer_draw_features)
+    "h_roll_draw_rate",
+    "a_roll_draw_rate",
+    # Season strength
+    "h_season_gpg",
+    "h_season_ppg",
+    "a_season_gpg",
+    "a_season_ppg",
+    "h_season_draw_rate",
+    "a_season_draw_rate",
+    # Categorical
+    "league",
+    "season",
+    # Pi-ratings
+    *PI_FEATURE_COLS,
+    # Glicko-2
+    *GLICKO2_FEATURE_COLS,
+    # Inference-only draw-relevant features
+    "h2h_draw_rate",
+    "h2h_total_matches",
+    "home_rest_days",
+    "away_rest_days",
+    "xg_diff",
+    "home_injury_count",
+    "away_injury_count",
+    "position_diff",
+]
+
+DRAW_CAT_FEATURES = ["league", "season"]
+
+# Draw league-group models: same as DRAW_FEATURES but without "league"
+DRAW_LEAGUE_GROUP_FEATURES = [f for f in DRAW_FEATURES if f != "league"]
+DRAW_LEAGUE_GROUP_CAT_FEATURES: list[str] = []  # season becomes numeric ordinal
 
 
 def build_inference_features(

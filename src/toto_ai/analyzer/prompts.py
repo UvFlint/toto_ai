@@ -193,6 +193,10 @@ def build_match_data_prompt(
             section += f"- P(Draw): {cp['X']:.1%}\n"
             section += f"- P(Away win): {cp['2']:.1%}\n"
 
+        if match.get("draw_prob") is not None:
+            section += "\n### Draw Detection Model\n"
+            section += f"- P(Draw): {match['draw_prob']:.1%} (dedicated binary draw classifier)\n"
+
         if match.get("home_xg") or match.get("away_xg"):
             section += "\n### Expected Goals (xG) - Season Stats\n"
             for side, key in [("home", "home_xg"), ("away", "away_xg")]:

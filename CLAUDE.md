@@ -17,7 +17,10 @@ CLI tool that analyzes Winner 16 football betting forms from winner.co.il. 4 AI 
 - Download historical match data: `uv run toto --download-data` (add `--force-download` to re-download)
 - Download Israeli data only: `uv run toto --download-israel`
 - Scrape historical odds from OddsPortal: `uv run toto --scrape-odds`
+- Scrape historical stats from SofaScore (Israeli): `uv run toto --scrape-sofascore`
 - Train ML models: `uv run toto --train-model`
+- Stabilize predictions (re-run AI N times): `uv run toto --stabilize <N>`
+- Review predictions vs actuals: `uv run toto --review [form_number]` (omit for latest)
 - Sync deps: `uv sync`
 - Lint: `uv run ruff check src/`
 - Format: `uv run ruff format src/`

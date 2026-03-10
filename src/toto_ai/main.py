@@ -77,6 +77,12 @@ def _download_israeli_data(settings: object, force: bool = False) -> None:
     "--scrape-odds", is_flag=True, help="Scrape historical odds from OddsPortal for Israeli leagues"
 )
 @click.option(
+    "--stabilize",
+    type=int,
+    default=None,
+    help="Re-run AI analysis N times for prediction stability (e.g. --stabilize 3)",
+)
+@click.option(
     "--scrape-sofascore",
     is_flag=True,
     help="Scrape historical match stats from SofaScore for Israeli leagues",
@@ -102,10 +108,15 @@ def main(
     download_israel: bool,
     train_model: bool,
     scrape_odds: bool,
+    stabilize: int | None,
     scrape_sofascore: bool,
     review: str | None,
 ) -> None:
     """Analyze the current Winner 16 form and predict outcomes using AI models."""
+    if stabilize is not None and stabilize < 2:
+        console.print(f"[red]--stabilize requires at least 2 runs (got {stabilize})[/red]")
+        raise SystemExit(1)
+
     if review:
         from toto_ai.review import run_review
 
@@ -127,7 +138,11 @@ def main(
 
         console.print("[bold blue]Toto AI - Backtesting Mode[/bold blue]")
         console.print()
-        asyncio.run(run_test_pipeline(url=url, no_research=no_research, premium=premium))
+        asyncio.run(
+            run_test_pipeline(
+                url=url, no_research=no_research, premium=premium, stabilize=stabilize
+            )
+        )
         return
 
     if download_data:
@@ -200,6 +215,7 @@ def main(
             premium=premium,
             send_auto=send_auto,
             schedule=schedule,
+            stabilize=stabilize,
         )
     )
 

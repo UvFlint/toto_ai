@@ -14,6 +14,7 @@ from toto_ai.analyzer.models import (
     ConsensusMatch,
     MatchPrediction,
     ModelCost,
+    StabilizedPrediction,
 )
 from toto_ai.analyzer.prompts import MATCH_ANALYSIS_SYSTEM_PROMPT, build_match_data_prompt
 from toto_ai.analyzer.tools import has_data_gaps
@@ -139,6 +140,8 @@ def _prepare_match_data(matches: list[Match], stats: list[MatchStats]) -> list[d
                 entry["poisson_probs"] = s.poisson_probs.model_dump()
             if s.catboost_probs:
                 entry["catboost_probs"] = s.catboost_probs
+            if s.draw_prob is not None:
+                entry["draw_prob"] = s.draw_prob
             if s.news_analysis and s.news_analysis.items:
                 entry["news_analysis"] = {
                     "items": [item.model_dump() for item in s.news_analysis.items],
@@ -254,20 +257,178 @@ def _find_bankers_and_upsets(
     return bankers, upsets
 
 
+def _stabilize_columns(
+    run_results: list[list[FullColumn]],
+    matches: list[Match],
+    stats: list[MatchStats],
+) -> tuple[list[FullColumn], dict[str, list[StabilizedPrediction]]]:
+    """Stabilize predictions across multiple runs per model.
+
+    Returns (stabilized_columns, stabilized_predictions_map).
+    """
+    from collections import Counter, defaultdict
+
+    stats_map = {(s.home_team, s.away_team): s for s in stats}
+
+    # Collect predictions: (model_name, match_number) -> list of prediction strings
+    pred_runs: dict[tuple[str, int], list[str]] = defaultdict(list)
+    # Collect full predictions for building final columns
+    full_preds: dict[tuple[str, int], list[MatchPrediction]] = defaultdict(list)
+    # Collect costs per model
+    model_costs: dict[str, list[ModelCost]] = defaultdict(list)
+
+    for run_cols in run_results:
+        for col in run_cols:
+            model_costs[col.model_name].append(col.usage)
+            for pred in col.predictions:
+                key = (col.model_name, pred.match_number)
+                pred_runs[key].append(pred.prediction)
+                full_preds[key].append(pred)
+
+    # Find all model names that had at least one successful run
+    model_names = list(
+        dict.fromkeys(col.model_name for run_cols in run_results for col in run_cols)
+    )
+
+    stabilized_columns: list[FullColumn] = []
+    stabilized_map: dict[str, list[StabilizedPrediction]] = {}
+
+    for model_name in model_names:
+        stable_preds: list[MatchPrediction] = []
+        stab_info: list[StabilizedPrediction] = []
+
+        for match in matches:
+            key = (model_name, match.match_number)
+            predictions = pred_runs.get(key, [])
+            all_preds = full_preds.get(key, [])
+
+            if not predictions:
+                continue
+
+            counter = Counter(predictions)
+            most_common_pred, most_common_count = counter.most_common(1)[0]
+            total_runs = len(predictions)
+
+            is_fallback = False
+            fallback_source = None
+            stable_pred = most_common_pred
+
+            # If no majority (all different), fall back to statistical model
+            if most_common_count == 1 and total_runs > 1:
+                s = stats_map.get((match.home_team, match.away_team))
+                if s and s.catboost_probs:
+                    stable_pred = max(s.catboost_probs, key=s.catboost_probs.get)
+                    is_fallback = True
+                    fallback_source = "catboost"
+                elif s and s.poisson_probs:
+                    poisson_map = {
+                        "1": s.poisson_probs.home_win,
+                        "X": s.poisson_probs.draw,
+                        "2": s.poisson_probs.away_win,
+                    }
+                    stable_pred = max(poisson_map, key=poisson_map.get)
+                    is_fallback = True
+                    fallback_source = "poisson"
+                # else: keep first run's prediction (last resort)
+
+            # Use the first matching MatchPrediction as template, override prediction
+            template = all_preds[0]
+            stable_match_pred = MatchPrediction(
+                match_number=template.match_number,
+                home_team=template.home_team,
+                away_team=template.away_team,
+                prediction=stable_pred,
+                confidence=template.confidence,
+                reasoning=template.reasoning,
+                key_factors=template.key_factors,
+            )
+            stable_preds.append(stable_match_pred)
+
+            stab_info.append(
+                StabilizedPrediction(
+                    match_number=match.match_number,
+                    stable_prediction=stable_pred,
+                    stability=f"{most_common_count}/{total_runs}",
+                    run_predictions=predictions,
+                    is_fallback=is_fallback,
+                    fallback_source=fallback_source,
+                )
+            )
+
+        # Aggregate cost across runs
+        costs = model_costs.get(model_name, [])
+        total_cost = ModelCost(
+            input_tokens=sum(c.input_tokens for c in costs),
+            output_tokens=sum(c.output_tokens for c in costs),
+            cost_usd=sum(c.cost_usd for c in costs),
+        )
+
+        stabilized_columns.append(
+            FullColumn(
+                model_name=model_name,
+                predictions=stable_preds,
+                usage=total_cost,
+            )
+        )
+        stabilized_map[model_name] = stab_info
+
+    return stabilized_columns, stabilized_map
+
+
 async def analyze_matches(
     matches: list[Match],
     stats: list[MatchStats],
     premium: bool = False,
     reference_date: datetime | None = None,
+    stabilize: int | None = None,
 ) -> FullReport:
-    """Run all three AI models in parallel and build the report."""
+    """Run all AI models in parallel and build the report.
+
+    When stabilize is set, re-runs the AI analysis N times and stabilizes
+    predictions per model via majority vote, falling back to statistical
+    models when predictions are fully unstable.
+    """
     models = MODELS_PREMIUM if premium else MODELS_STANDARD
     match_data = _prepare_match_data(matches, stats)
 
     gaps = has_data_gaps(match_data)
     prompt = build_match_data_prompt(match_data, flag_gaps=gaps, reference_date=reference_date)
 
-    # Run all models in parallel
+    if stabilize:
+        # Multi-run stabilization mode
+        all_runs: list[list[FullColumn]] = []
+        for run_num in range(stabilize):
+            console.print(
+                f"\n[bold blue]Stabilization run {run_num + 1}/{stabilize}...[/bold blue]"
+            )
+            tasks = [
+                _run_single_model(model_id, model_name, prompt) for model_id, model_name in models
+            ]
+            run_columns = await asyncio.gather(*tasks)
+            run_columns = [c for c in run_columns if c.predictions]
+            all_runs.append(list(run_columns))
+
+        # Check we got at least some successful runs
+        total_successful = sum(len(run) for run in all_runs)
+        if total_successful == 0:
+            console.print("[red]All models failed across all runs. Cannot produce report.[/red]")
+            return FullReport()
+
+        stabilized_cols, stabilized_map = _stabilize_columns(all_runs, matches, stats)
+        consensus = _build_consensus(stabilized_cols, matches)
+        bankers, upsets = _find_bankers_and_upsets(stabilized_cols, consensus)
+
+        return FullReport(
+            columns=stabilized_cols,
+            consensus=consensus,
+            banker_picks=bankers,
+            upset_alerts=upsets,
+            stabilize_runs=stabilize,
+            run_columns=all_runs,
+            stabilized_predictions=stabilized_map,
+        )
+
+    # Standard single-run mode
     tasks = [_run_single_model(model_id, model_name, prompt) for model_id, model_name in models]
     columns = await asyncio.gather(*tasks)
     columns = [c for c in columns if c.predictions]  # Filter out failed models

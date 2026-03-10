@@ -332,6 +332,12 @@ class ApiFootballDownloader:
         # Load existing progress for this division
         prog_data = self._load_progress(div_code)
         season_key = str(season)
+
+        # When forcing a re-download, clear enrichment progress for this season
+        if force and f"{season_key}_enriched" in prog_data:
+            del prog_data[f"{season_key}_enriched"]
+            self._save_progress(div_code, prog_data)
+
         enriched_ids: set[int] = set(prog_data.get(f"{season_key}_enriched", []))
 
         # Phase 1: Fetch all fixtures

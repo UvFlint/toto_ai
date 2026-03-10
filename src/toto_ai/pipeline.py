@@ -185,11 +185,28 @@ def _attach_news_snapshots(
             report.news_snapshots.append(
                 MatchNewsSnapshot(
                     match_number=matches[i].match_number,
+                    home_team=matches[i].home_team,
+                    away_team=matches[i].away_team,
                     has_x_factor=s.news_analysis.has_x_factor,
                     net_impact=s.news_analysis.net_impact,
                     post_odds_item_count=sum(1 for it in s.news_analysis.items if it.is_post_odds),
                     multiplier_used=multiplier,
                 )
+            )
+
+
+def _attach_draw_probs(
+    report: FullReport, matches: list[Match], stats: list[MatchStats]
+) -> None:
+    """Populate report.draw_probs from stats draw_prob field."""
+    from toto_ai.analyzer.models import MatchDrawInfo
+
+    stats_map = {(s.home_team, s.away_team): s for s in stats}
+    for match in matches:
+        s = stats_map.get((match.home_team, match.away_team))
+        if s and s.draw_prob is not None:
+            report.draw_probs.append(
+                MatchDrawInfo(match_number=match.match_number, draw_prob=s.draw_prob)
             )
 
 
@@ -451,6 +468,7 @@ async def run_pipeline(
     premium: bool = False,
     send_auto: bool = False,
     schedule: bool = False,
+    stabilize: int | None = None,
 ) -> FullReport:
     """Run the complete analysis pipeline.
 
@@ -549,6 +567,17 @@ async def run_pipeline(
         )
         console.print()
 
+        # ── Step 2e: Draw Detection Classifier ───────────────────────
+        console.rule("[bold]Step 2e: Draw Detection Classifier[/bold]")
+        from toto_ai.ml.catboost_model import enrich_stats_with_draw_probability
+
+        enrich_stats_with_draw_probability(form.matches, stats)
+        draw_count = sum(1 for s in stats if s.draw_prob is not None)
+        console.print(
+            f"[green]Draw probabilities computed for {draw_count}/{len(form.matches)} matches[/green]"
+        )
+        console.print()
+
         # ── Step 3: News Gathering ────────────────────────────────────
         console.rule("[bold]Step 3: Gathering News[/bold]")
         await _gather_news(form.matches, stats, no_research)
@@ -598,10 +627,14 @@ async def run_pipeline(
 
         models = MODELS_PREMIUM if premium else MODELS_STANDARD
         tier = "Premium" if premium else "Standard"
-        console.rule(f"[bold]Step 4: AI Analysis ({len(models)} Models — {tier})[/bold]")
-        report = await analyze_matches(form.matches, stats, premium=premium)
+        runs_label = f" × {stabilize} Runs" if stabilize else ""
+        console.rule(
+            f"[bold]Step 4: AI Analysis ({len(models)} Models{runs_label} — {tier})[/bold]"
+        )
+        report = await analyze_matches(form.matches, stats, premium=premium, stabilize=stabilize)
         report.form_number = form.form_number
         _attach_news_snapshots(report, form.matches, stats)
+        _attach_draw_probs(report, form.matches, stats)
         console.print()
 
         console.rule("[bold]Step 5: Results[/bold]")
@@ -644,6 +677,7 @@ async def run_test_pipeline(
     url: str,
     no_research: bool = False,
     premium: bool = False,
+    stabilize: int | None = None,
 ) -> None:
     """Run backtesting pipeline against a past results form.
 
@@ -735,6 +769,17 @@ async def run_test_pipeline(
     )
     console.print()
 
+    # Step 2e: Draw Detection Classifier
+    console.rule("[bold]Step 2e: Draw Detection Classifier[/bold]")
+    from toto_ai.ml.catboost_model import enrich_stats_with_draw_probability
+
+    enrich_stats_with_draw_probability(form.matches, stats)
+    draw_count = sum(1 for s in stats if s.draw_prob is not None)
+    console.print(
+        f"[green]Draw probabilities computed for {draw_count}/{len(form.matches)} matches[/green]"
+    )
+    console.print()
+
     # Step 3: News gathering
     console.rule("[bold]Step 3: Gathering News[/bold]")
     await _gather_news(form.matches, stats, no_research)
@@ -764,12 +809,18 @@ async def run_test_pipeline(
 
     models = MODELS_PREMIUM if premium else MODELS_STANDARD
     tier = "Premium" if premium else "Standard"
-    console.rule(f"[bold]Step 4: AI Analysis ({len(models)} Models — {tier})[/bold]")
+    runs_label = f" × {stabilize} Runs" if stabilize else ""
+    console.rule(f"[bold]Step 4: AI Analysis ({len(models)} Models{runs_label} — {tier})[/bold]")
     report = await analyze_matches(
-        form.matches, stats, premium=premium, reference_date=reference_date
+        form.matches,
+        stats,
+        premium=premium,
+        reference_date=reference_date,
+        stabilize=stabilize,
     )
     report.form_number = form.form_number
     _attach_news_snapshots(report, form.matches, stats)
+    _attach_draw_probs(report, form.matches, stats)
     console.print()
 
     # Step 5: Display predictions

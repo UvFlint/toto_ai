@@ -162,5 +162,7 @@ class MatchStats(BaseModel):
     poisson_probs: PoissonProbabilities | None = None
     # CatBoost ML model probabilities
     catboost_probs: dict[str, float] | None = None
+    # Draw detection binary classifier probability
+    draw_prob: float | None = None
     # Structured news categorization
     news_analysis: MatchNewsAnalysis | None = None

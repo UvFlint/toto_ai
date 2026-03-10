@@ -23,6 +23,8 @@ def write_report_to_file(report: FullReport) -> Path:
     lines.append("# Winner 16 AI Analysis Report")
     lines.append(f"**Form:** {report.form_number or 'Unknown'}  ")
     lines.append(f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    if report.stabilize_runs:
+        lines.append(f"**Stabilized:** over {report.stabilize_runs} runs")
     lines.append("")
 
     # Predictions table
@@ -33,8 +35,9 @@ def write_report_to_file(report: FullReport) -> Path:
         ["#", "Home", "Away"]
         + ext_headers
         + [col.model_name for col in report.columns]
-        + ["Consensus", "Union"]
+        + ["Consensus", "Union", "Draw%"]
     )
+    draw_prob_map = {d.match_number: d.draw_prob for d in report.draw_probs}
     lines.append("| " + " | ".join(headers) + " |")
     lines.append("| " + " | ".join(["---"] * len(headers)) + " |")
 
@@ -79,6 +82,9 @@ def write_report_to_file(report: FullReport) -> Path:
         union_str = "/".join(p for p in ["1", "X", "2"] if p in seen)
         row.append(union_str)
 
+        dp = draw_prob_map.get(match_num)
+        row.append(f"{dp:.0%}" if dp is not None else "-")
+
         lines.append("| " + " | ".join(row) + " |")
 
     lines.append("")
@@ -96,6 +102,26 @@ def write_report_to_file(report: FullReport) -> Path:
         ", ".join(f"#{n}" for n in report.upset_alerts) if report.upset_alerts else "_None_"
     )
     lines.append("")
+
+    # News impact (post-odds items only)
+    post_odds_snapshots = [s for s in report.news_snapshots if s.post_odds_item_count > 0]
+    if post_odds_snapshots:
+        lines.append("## News Impact (post-published form)")
+        lines.append("")
+        lines.append("| # | Match | Net Impact | Post-Odds Items | X-Factor | Multiplier |")
+        lines.append("| --- | --- | --- | --- | --- | --- |")
+        for snap in sorted(post_odds_snapshots, key=lambda s: s.match_number):
+            direction = (
+                "Home" if snap.net_impact > 0 else "Away" if snap.net_impact < 0 else "Neutral"
+            )
+            impact_str = f"{snap.net_impact:+.2f} → {direction}"
+            x_factor = "**YES**" if snap.has_x_factor else "-"
+            items_str = str(snap.post_odds_item_count)
+            lines.append(
+                f"| {snap.match_number} | {snap.home_team} vs {snap.away_team} "
+                f"| {impact_str} | {items_str} | {x_factor} | ×{snap.multiplier_used} |"
+            )
+        lines.append("")
 
     # Detailed reasoning per model
     lines.append("## Detailed Reasoning")
