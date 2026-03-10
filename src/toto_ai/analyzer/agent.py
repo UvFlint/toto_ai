@@ -29,7 +29,7 @@ _DEEPSEEK_MODEL_ID = "deepseek-reasoner"
 # Use "deepseek:<model>" prefix to signal DeepSeek custom provider
 MODELS_STANDARD = [
     ("openai:gpt-4o", "GPT-4o (gpt-4o)"),
-    ("google-gla:gemini-2.5-flash", "Gemini Flash (gemini-2.5-flash)"),
+    ("google-gla:gemini-3-flash-preview", "Gemini Flash (gemini-3-flash-preview)"),
     ("anthropic:claude-sonnet-4-6", "Claude Sonnet (claude-sonnet-4-6)"),
     (f"deepseek:{_DEEPSEEK_MODEL_ID}", f"DeepSeek ({_DEEPSEEK_MODEL_ID})"),
 ]

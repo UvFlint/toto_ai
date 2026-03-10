@@ -40,7 +40,7 @@ RULES:
 """
 
 _CATEGORIZER_AGENT_NO_DATE = Agent(
-    "google-gla:gemini-2.5-flash",
+    "google-gla:gemini-3-flash-preview",
     output_type=MatchNewsAnalysis,
     system_prompt=_CATEGORIZER_SYSTEM_PROMPT.format(
         post_odds_cutoff="start of the current week (Monday)"
@@ -54,7 +54,7 @@ def _make_categorizer_agent(odds_date: datetime | None) -> Agent:
         return _CATEGORIZER_AGENT_NO_DATE
     cutoff_str = odds_date.strftime("%A %Y-%m-%d")
     system_prompt = _CATEGORIZER_SYSTEM_PROMPT.format(post_odds_cutoff=cutoff_str)
-    return Agent("google-gla:gemini-2.5-flash", output_type=MatchNewsAnalysis, system_prompt=system_prompt)
+    return Agent("google-gla:gemini-3-flash-preview", output_type=MatchNewsAnalysis, system_prompt=system_prompt)
 
 
 async def categorize_all_news(
