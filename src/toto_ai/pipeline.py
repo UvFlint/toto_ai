@@ -601,7 +601,9 @@ async def run_pipeline(
             console.rule("[bold]Step 3b: Categorizing News[/bold]")
             from toto_ai.news.categorizer import categorize_all_news
 
-            await categorize_all_news(stats, form.matches)
+            # Form is published ~7 days before deadline; odds are set at publication time
+            odds_date = (form.deadline - timedelta(days=7)) if form.deadline else None
+            await categorize_all_news(stats, form.matches, odds_date=odds_date)
             console.print()
 
         console.rule("[bold]Data Verification[/bold]")
@@ -803,7 +805,9 @@ async def run_test_pipeline(
         console.rule("[bold]Step 3b: Categorizing News[/bold]")
         from toto_ai.news.categorizer import categorize_all_news
 
-        await categorize_all_news(stats, form.matches)
+        # Form is published ~7 days before deadline; odds are set at publication time
+        odds_date = (form.deadline - timedelta(days=7)) if form.deadline else None
+        await categorize_all_news(stats, form.matches, odds_date=odds_date)
         console.print()
 
     # Data verification

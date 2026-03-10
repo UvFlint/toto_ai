@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 
 import httpx
 from pydantic_ai import Agent, WebSearchTool
@@ -23,13 +24,14 @@ _NEWS_AGENT = Agent(
 )
 
 _SEARCH_PROMPT = (
-    "Search for the latest news about the upcoming football match: "
+    "Today is {today}. Search for the latest news about the upcoming football match: "
     "{home} vs {away}. "
     "Focus on: key injuries & suspensions, recent team news, "
     "managerial changes, motivation factors (title race, relegation battle), "
     "and fixture congestion. "
+    "For each finding, indicate when it was reported (e.g. 'reported {today}', 'reported yesterday'). "
     "Provide a concise summary of the most relevant findings in 3-5 bullet points. "
-    "Only include confirmed, recent information."
+    "Only include confirmed, recent information. Prioritize news from the last 48 hours."
 )
 
 _ISRAELI_SEARCH_SUFFIX = (
@@ -48,7 +50,8 @@ async def _search_match_news(
     """Use Gemini with WebSearchTool to find news for a single match."""
     async with semaphore:
         try:
-            prompt = _SEARCH_PROMPT.format(home=home, away=away)
+            today = date.today().strftime("%Y-%m-%d")
+            prompt = _SEARCH_PROMPT.format(home=home, away=away, today=today)
             if is_israeli:
                 prompt += _ISRAELI_SEARCH_SUFFIX
             result = await _NEWS_AGENT.run(prompt)

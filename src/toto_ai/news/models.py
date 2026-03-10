@@ -78,7 +78,7 @@ class NewsItem(BaseModel):
     )
     is_post_odds: bool = Field(
         default=False,
-        description="True if this news emerged AFTER the betting form was published (Monday)",
+        description="True if this news emerged AFTER the betting form was published (~7 days before deadline, when odds were set)",
     )
     player_name: str | None = Field(default=None, description="Affected player name, if applicable")
 

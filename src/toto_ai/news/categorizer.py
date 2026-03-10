@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 
 from pydantic_ai import Agent
 
@@ -8,10 +9,7 @@ from toto_ai.console import console
 from toto_ai.news.models import MatchNewsAnalysis
 from toto_ai.stats.models import MatchStats
 
-_CATEGORIZER_AGENT = Agent(
-    "google-gla:gemini-2.5-flash",
-    output_type=MatchNewsAnalysis,
-    system_prompt="""\
+_CATEGORIZER_SYSTEM_PROMPT = """\
 You are a football news analyst. Given raw news text about an upcoming match,
 extract and categorize each distinct news item.
 
@@ -31,14 +29,32 @@ CATEGORIES (use exactly these values):
 
 RULES:
 - Only include CONFIRMED news, not rumors or speculation
-- Set is_post_odds=true if the news clearly emerged after the start of the week (Monday)
+- POST-ODDS DATE: {post_odds_cutoff}. Set is_post_odds=true if the news emerged AFTER this date.
+  This means the bookmaker could NOT have priced this information into the odds — treat it with
+  higher importance. If no date can be inferred for a news item, use your best judgment.
 - For direction: 'positive' means it HELPS the affected_team, 'negative' means it HURTS them
 - affected_team must be 'home', 'away', or 'both'
 - confidence: 0.9+ for official club announcements, 0.6-0.8 for reputable journalists, 0.3-0.5 for rumors
 - If no meaningful news exists, return an empty items list
 - Do NOT fabricate news items — only extract what is present in the text
-""",
+"""
+
+_CATEGORIZER_AGENT_NO_DATE = Agent(
+    "google-gla:gemini-2.5-flash",
+    output_type=MatchNewsAnalysis,
+    system_prompt=_CATEGORIZER_SYSTEM_PROMPT.format(
+        post_odds_cutoff="start of the current week (Monday)"
+    ),
 )
+
+
+def _make_categorizer_agent(odds_date: datetime | None) -> Agent:
+    """Create a categorizer agent with the correct post-odds cutoff date."""
+    if odds_date is None:
+        return _CATEGORIZER_AGENT_NO_DATE
+    cutoff_str = odds_date.strftime("%A %Y-%m-%d")
+    system_prompt = _CATEGORIZER_SYSTEM_PROMPT.format(post_odds_cutoff=cutoff_str)
+    return Agent("google-gla:gemini-2.5-flash", output_type=MatchNewsAnalysis, system_prompt=system_prompt)
 
 
 async def categorize_all_news(
@@ -46,8 +62,15 @@ async def categorize_all_news(
     matches: list,
     *,
     max_concurrent: int = 4,
+    odds_date: datetime | None = None,
 ) -> None:
-    """Categorize raw news text into structured MatchNewsAnalysis for each match."""
+    """Categorize raw news text into structured MatchNewsAnalysis for each match.
+
+    Args:
+        odds_date: The date when the betting form was published (odds were set).
+                   News after this date is flagged is_post_odds=True and weighted higher.
+    """
+    agent = _make_categorizer_agent(odds_date)
     semaphore = asyncio.Semaphore(max_concurrent)
     total = len(stats)
     completed_count = 0
@@ -66,7 +89,7 @@ async def categorize_all_news(
                 home = s.home_team_english or matches[idx].home_team
                 away = s.away_team_english or matches[idx].away_team
                 prompt = f"Match: {home} (home) vs {away} (away)\n\nRaw news:\n{s.news}"
-                result = await _CATEGORIZER_AGENT.run(prompt)
+                result = await agent.run(prompt)
                 analysis = result.output
             except Exception as e:
                 home = matches[idx].home_team
