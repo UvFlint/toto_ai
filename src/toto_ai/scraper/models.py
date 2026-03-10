@@ -14,6 +14,7 @@ class Match(BaseModel):
     country: str = ""
     match_date: datetime | None = None
     result: Literal["1", "X", "2"] | None = None
+    sportradar_url: str | None = None
 
 
 class WinnerForm(BaseModel):

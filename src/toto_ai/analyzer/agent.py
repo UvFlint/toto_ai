@@ -82,6 +82,7 @@ def _create_agent(
     kwargs: dict = dict(
         output_type=list[MatchPrediction],
         system_prompt=MATCH_ANALYSIS_SYSTEM_PROMPT,
+        output_retries=3,
     )
     if model_settings:
         kwargs["model_settings"] = model_settings

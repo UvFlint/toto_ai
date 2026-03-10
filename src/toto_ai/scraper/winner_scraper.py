@@ -33,6 +33,7 @@ class WinnerScraper:
         options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_argument("--disable-gpu")
         options.add_argument("--disable-software-rasterizer")
+        options.add_argument("--disable-popup-blocking")
         options.add_argument(
             "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -78,6 +79,7 @@ class WinnerScraper:
                 console.print(
                     f"[green]Found {len(form.matches)} matches from API responses[/green]"
                 )
+                self._enrich_sportradar_urls(driver, form)
                 return form
 
             # Fallback: extract from rendered DOM
@@ -86,6 +88,7 @@ class WinnerScraper:
 
             if form.matches:
                 console.print(f"[green]Found {len(form.matches)} matches from DOM[/green]")
+                self._enrich_sportradar_urls(driver, form)
             else:
                 console.print(
                     "[yellow]No matches found. The site structure may have changed.[/yellow]"
@@ -95,6 +98,79 @@ class WinnerScraper:
             return form
         finally:
             driver.quit()
+
+    def _enrich_sportradar_urls(self, driver: object, form: WinnerForm) -> None:
+        """Extract Sportradar widget URLs from bet-radar-N buttons and attach to matches.
+
+        Detects new browser tabs opened by each button click and captures the URL,
+        which works regardless of how the React app triggers the navigation.
+        """
+        import time
+
+        from selenium.webdriver.common.by import By
+        from selenium.webdriver.support import expected_conditions as EC
+        from selenium.webdriver.support.ui import WebDriverWait
+
+        try:
+            main_handle = driver.current_window_handle  # type: ignore[attr-defined]
+        except Exception:
+            return
+
+        sportradar_urls: dict[int, str] = {}
+
+        for i in range(16):
+            btn_id = f"bet-radar-{i}"
+            try:
+                btn = driver.find_element(By.ID, btn_id)  # type: ignore[attr-defined]
+                driver.execute_script("arguments[0].scrollIntoView(true);", btn)  # type: ignore[attr-defined]
+                time.sleep(0.3)
+
+                handles_before = set(driver.window_handles)  # type: ignore[attr-defined]
+                driver.execute_script("arguments[0].click();", btn)  # type: ignore[attr-defined]
+
+                # Poll for a new tab (up to 4 seconds)
+                new_handle = None
+                deadline = time.time() + 4
+                while time.time() < deadline:
+                    new_handles = set(driver.window_handles) - handles_before  # type: ignore[attr-defined]
+                    if new_handles:
+                        new_handle = new_handles.pop()
+                        break
+                    time.sleep(0.1)
+
+                if new_handle:
+                    driver.switch_to.window(new_handle)  # type: ignore[attr-defined]
+                    try:
+                        WebDriverWait(driver, 5).until(EC.url_contains("sportradar"))
+                    except Exception:
+                        pass
+                    url = driver.current_url  # type: ignore[attr-defined]
+                    driver.close()  # type: ignore[attr-defined]
+                    driver.switch_to.window(main_handle)  # type: ignore[attr-defined]
+
+                    if url and "sportradar" in url:
+                        sportradar_urls[i] = url
+                        console.print(f"[dim]bet-radar-{i}: {url[:80]}[/dim]")
+            except Exception:
+                # Ensure we stay on the main tab
+                try:
+                    if main_handle in driver.window_handles:  # type: ignore[attr-defined]
+                        driver.switch_to.window(main_handle)  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+                continue
+
+        if not sportradar_urls:
+            console.print("[dim]No sportradar URLs found via button clicks.[/dim]")
+            return
+
+        # Attach URLs to matches by index
+        for match in form.matches:
+            idx = match.match_number - 1
+            if idx in sportradar_urls:
+                match.sportradar_url = sportradar_urls[idx]
+
+        console.print(f"[green]Enriched {len(sportradar_urls)} matches with Sportradar URLs[/green]")
 
     def _dump_debug_info(self, driver: object) -> None:
         """Save screenshot and page source for debugging when scraping fails."""

@@ -16,6 +16,7 @@ from toto_ai.news.collector import gather_news
 from toto_ai.scraper.models import Match, WinnerForm
 from toto_ai.scraper.winner_scraper import WinnerScraper, create_mock_form
 from toto_ai.stats.api_football_stats import ApiFootballStatsCollector
+from toto_ai.stats.sportradar_stats import SportradarStatsCollector
 from toto_ai.stats.models import MatchStats
 from toto_ai.console import console
 
@@ -105,9 +106,11 @@ async def _research_stats(
     matches: list[Match],
     skip_research: bool,
 ) -> list[MatchStats]:
-    """Gather structured stats for all matches using API-Football v3.
+    """Gather structured stats for all matches.
 
-    Fetches H2H, form, standings, injuries, odds per match.
+    Uses Sportradar (free) when sportradar_url is available on matches, supplemented
+    by API-Football for injuries. Falls back to API-Football-only when no Sportradar
+    URLs are present.
     """
     if skip_research:
         console.print("[dim]Skipping match research[/dim]")
@@ -115,15 +118,25 @@ async def _research_stats(
 
     from toto_ai.config import settings
 
+    sr_matches = [m for m in matches if m.sportradar_url]
+    if sr_matches:
+        console.print(
+            f"[dim]Using Sportradar for {len(sr_matches)}/{len(matches)} matches[/dim]"
+        )
+        collector = SportradarStatsCollector(use_api_football=bool(settings.API_FOOTBALL_API_KEY))
+        stats = await collector.research_all_matches(matches)
+        console.print(f"[green]Stats research complete: {len(stats)} matches[/green]")
+        return stats
+
+    # Fallback: API-Football only (no Sportradar URLs available)
     if not settings.API_FOOTBALL_API_KEY:
         console.print("[dim]API_FOOTBALL_API_KEY not set — skipping research[/dim]")
         return [MatchStats(home_team=m.home_team, away_team=m.away_team) for m in matches]
 
-    collector = ApiFootballStatsCollector()
-
+    console.print("[dim]No Sportradar URLs — falling back to API-Football[/dim]")
+    collector_af = ApiFootballStatsCollector()
     match_tuples = [(m.home_team, m.away_team, m.league, m.match_date) for m in matches]
-    stats = await collector.research_all_matches(match_tuples)
-
+    stats = await collector_af.research_all_matches(match_tuples)
     console.print(f"[green]Stats research complete: {len(stats)} matches[/green]")
     return stats
 
